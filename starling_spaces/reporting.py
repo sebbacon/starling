@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -36,6 +36,18 @@ class Money:
 
 
 @dataclass(frozen=True)
+class RecurringTransfer:
+    transfer_uid: str
+    amount: Money
+    frequency: str
+    interval: Optional[int]
+    next_payment_date: Optional[str]
+    top_up: Optional[bool]
+    reference: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True)
 class Space:
     uid: str
     name: str
@@ -43,6 +55,7 @@ class Space:
     balance: Money
     goal_amount: Optional[Money]
     settings: Dict[str, Any] = field(default_factory=dict)
+    recurring_transfer: Optional[RecurringTransfer] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -128,6 +141,14 @@ def fetch_spaces_configuration(
                     raise StarlingSchemaError(
                         f"{exc} (accountUid={account_uid})"
                     ) from exc
+                recurring = _fetch_recurring_transfer(
+                    client,
+                    account_uid=account_uid,
+                    space_uid=space.uid,
+                    currency_hint=space.balance.currency,
+                )
+                if recurring:
+                    space = replace(space, recurring_transfer=recurring)
                 spaces.append(space)
             reports.append(
                 AccountReport(
@@ -158,6 +179,10 @@ def iter_report_lines(reports: Sequence[AccountReport]) -> Iterable[str]:
             yield f"    Balance: {space.balance.formatted}"
             if space.goal_amount:
                 yield f"    Target: {space.goal_amount.formatted}"
+            if space.recurring_transfer:
+                yield _format_recurring_transfer(space.recurring_transfer)
+                if space.recurring_transfer.reference:
+                    yield f"      Reference: {space.recurring_transfer.reference}"
             if space.state:
                 yield f"    State: {space.state}"
             if space.settings:
@@ -311,6 +336,74 @@ def _collect_settings(item: Dict[str, Any]) -> Dict[str, Any]:
         if key in item and key not in settings:
             settings[key] = item[key]
     return settings
+
+
+def _format_recurring_transfer(rt: RecurringTransfer) -> str:
+    schedule = _describe_schedule(rt.frequency, rt.interval)
+    line = f"    Recurring transfer: {rt.amount.formatted} ({schedule})"
+    if rt.next_payment_date:
+        line += f", next on {rt.next_payment_date}"
+    if rt.top_up:
+        line += " [top-up]"
+    return line
+
+
+def _describe_schedule(frequency: str, interval: Optional[int]) -> str:
+    freq = frequency.replace("_", " ").lower()
+    if not interval or interval == 1:
+        return freq
+    return f"every {interval} {freq}"
+
+
+def _fetch_recurring_transfer(
+    client: httpx.Client,
+    *,
+    account_uid: str,
+    space_uid: str,
+    currency_hint: Optional[str],
+) -> Optional[RecurringTransfer]:
+    url = f"/api/v2/account/{account_uid}/savings-goals/{space_uid}/recurring-transfer"
+    try:
+        data = _request_json(client, "GET", url)
+    except StarlingAPIError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+    return _parse_recurring_transfer(data, currency_hint=currency_hint)
+
+
+def _parse_recurring_transfer(
+    data: Dict[str, Any],
+    *,
+    currency_hint: Optional[str],
+) -> Optional[RecurringTransfer]:
+    if not isinstance(data, dict):
+        raise StarlingSchemaError("Recurring transfer payload is not an object")
+
+    transfer_uid = data.get("transferUid")
+    if not transfer_uid:
+        raise StarlingSchemaError("Recurring transfer missing transferUid")
+
+    amount = _parse_money(data.get("currencyAndAmount"), default_currency=currency_hint)
+    if not amount:
+        raise StarlingSchemaError("Recurring transfer missing currencyAndAmount")
+
+    rule = data.get("recurrenceRule") or {}
+    frequency = rule.get("frequency")
+    if not frequency:
+        raise StarlingSchemaError("Recurring transfer missing frequency")
+    interval = rule.get("interval")
+
+    return RecurringTransfer(
+        transfer_uid=transfer_uid,
+        amount=amount,
+        frequency=str(frequency),
+        interval=interval,
+        next_payment_date=data.get("nextPaymentDate"),
+        top_up=data.get("topUp"),
+        reference=data.get("reference"),
+        raw=data,
+    )
 
 
 def _request_json(client: httpx.Client, method: str, url: str) -> Dict[str, Any]:

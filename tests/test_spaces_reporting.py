@@ -43,11 +43,29 @@ def test_fetches_spaces_configuration_and_formats_lines(respx_mock):
                         "name": "Holiday",
                         "state": "ACTIVE",
                         "totalSaved": {"currency": "GBP", "minorUnits": 3050},
-                        "settings": {},
-                    },
-                ]
-            }
+                    "settings": {},
+                },
+            ]
+        }
     )
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/account/acc-123/savings-goals/space-1/recurring-transfer"
+    ).respond(
+        json={
+            "transferUid": "tx-1",
+            "recurrenceRule": {
+                "frequency": "MONTHLY",
+                "interval": 1,
+            },
+            "currencyAndAmount": {"currency": "GBP", "minorUnits": 30000},
+            "nextPaymentDate": "2025-11-02",
+            "topUp": True,
+            "reference": "Budget top-up",
+        }
+    )
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/account/acc-123/savings-goals/space-2/recurring-transfer"
+    ).respond(status_code=404, json={"error": "not found"})
 
     reports = fetch_spaces_configuration("TOKEN")
 
@@ -67,6 +85,12 @@ def test_fetches_spaces_configuration_and_formats_lines(respx_mock):
     assert any("Rainy Day (space-1)" in line for line in lines)
     assert any("Balance: GBP 1,200.00" in line for line in lines)
     assert any("Target: GBP 2,000.00" in line for line in lines)
+    assert any(
+        "Recurring transfer: GBP 300.00 (monthly), next on 2025-11-02 [top-up]"
+        in line
+        for line in lines
+    )
+    assert any("Reference: Budget top-up" in line for line in lines)
     assert any("roundUpMultiplier: 2" in line for line in lines)
     assert any("sweepEnabled: True" in line for line in lines)
     assert any("Holiday (space-2)" in line for line in lines)
