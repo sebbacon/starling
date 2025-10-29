@@ -71,6 +71,7 @@ class AccountReport:
     account_name: Optional[str]
     currency: Optional[str]
     default_category: Optional[str]
+    balance: Optional[Money] = None
     spaces: Sequence[Space] = field(default_factory=list)
 
 
@@ -90,6 +91,15 @@ GOAL_KEYS: Tuple[str, ...] = (
     "targetAmount",
     "targetAmountInMinorUnits",
     "targetBalance",
+)
+
+ACCOUNT_BALANCE_KEYS: Tuple[str, ...] = (
+    "effectiveBalance",
+    "currentBalance",
+    "availableToSpend",
+    "clearedBalance",
+    "accountBalance",
+    "balance",
 )
 
 MONEY_KEY_CANDIDATES: Tuple[str, ...] = (
@@ -164,12 +174,18 @@ def fetch_spaces_configuration(
                 if recurring:
                     space = replace(space, recurring_transfer=recurring)
                 spaces.append(space)
+            balance = _fetch_account_balance(
+                client,
+                account_uid=account_uid,
+                currency_hint=account.get("currency"),
+            )
             reports.append(
                 AccountReport(
                     account_uid=account_uid,
                     account_name=account.get("name"),
                     currency=account.get("currency"),
                     default_category=account.get("defaultCategory"),
+                    balance=balance,
                     spaces=spaces,
                 )
             )
@@ -205,6 +221,58 @@ def iter_report_lines(reports: Sequence[AccountReport]) -> Iterable[str]:
                     yield f"      {key}: {space.settings[key]}"
             else:
                 yield "    Settings: none"
+
+
+def build_report_payload(reports: Sequence[AccountReport]) -> Dict[str, Any]:
+    return {
+        "accounts": [
+            {
+                "accountUid": report.account_uid,
+                "accountName": report.account_name,
+                "currency": report.currency,
+                "defaultCategory": report.default_category,
+                "balance": _money_to_dict(report.balance),
+                "spaces": [_space_to_dict(space) for space in report.spaces],
+            }
+            for report in reports
+        ]
+    }
+
+
+def _space_to_dict(space: Space) -> Dict[str, Any]:
+    return {
+        "spaceUid": space.uid,
+        "name": space.name,
+        "state": space.state,
+        "balance": _money_to_dict(space.balance),
+        "goalAmount": _money_to_dict(space.goal_amount),
+        "settings": dict(space.settings),
+        "recurringTransfer": _recurring_transfer_to_dict(space.recurring_transfer),
+    }
+
+
+def _recurring_transfer_to_dict(rt: Optional[RecurringTransfer]) -> Optional[Dict[str, Any]]:
+    if rt is None:
+        return None
+    return {
+        "transferUid": rt.transfer_uid,
+        "amount": _money_to_dict(rt.amount),
+        "frequency": rt.frequency,
+        "interval": rt.interval,
+        "nextPaymentDate": rt.next_payment_date,
+        "topUp": rt.top_up,
+        "reference": rt.reference,
+    }
+
+
+def _money_to_dict(money: Optional[Money]) -> Optional[Dict[str, Any]]:
+    if money is None:
+        return None
+    return {
+        "currency": money.currency,
+        "minorUnits": money.minor_units,
+        "formatted": money.formatted,
+    }
 
 
 def _parse_money(value: Any, *, default_currency: Optional[str] = None) -> Optional[Money]:
@@ -367,6 +435,54 @@ def _describe_schedule(frequency: str, interval: Optional[int]) -> str:
     if not interval or interval == 1:
         return freq
     return f"every {interval} {freq}"
+
+
+def _fetch_account_balance(
+    client: httpx.Client,
+    *,
+    account_uid: str,
+    currency_hint: Optional[str],
+) -> Money:
+    data = _request_json(
+        client,
+        "GET",
+        f"/api/v2/accounts/{account_uid}/balance",
+        max_attempts=3,
+        retry_statuses=RETRYABLE_STATUS_CODES,
+    )
+    balance = _parse_account_balance(data, currency_hint=currency_hint)
+    if not balance:
+        raise StarlingSchemaError(
+            f"Missing recognised account balance for account {account_uid}"
+        )
+    return balance
+
+
+def _parse_account_balance(
+    data: Any,
+    *,
+    currency_hint: Optional[str],
+) -> Optional[Money]:
+    money = _parse_money(data, default_currency=currency_hint)
+    if money:
+        return money
+    if isinstance(data, dict):
+        for key in ACCOUNT_BALANCE_KEYS:
+            if key not in data:
+                continue
+            nested_money = _parse_money(data[key], default_currency=currency_hint)
+            if nested_money:
+                return nested_money
+        for value in data.values():
+            nested_money = _parse_account_balance(value, currency_hint=currency_hint)
+            if nested_money:
+                return nested_money
+    elif isinstance(data, list):
+        for item in data:
+            nested_money = _parse_account_balance(item, currency_hint=currency_hint)
+            if nested_money:
+                return nested_money
+    return None
 
 
 def _fetch_recurring_transfer(

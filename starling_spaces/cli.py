@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from typing import Iterable, Optional, Sequence
@@ -8,8 +9,8 @@ from typing import Iterable, Optional, Sequence
 from dotenv import load_dotenv
 
 from .reporting import (API_BASE_URL, AccountReport, StarlingAPIError,
-                        StarlingSchemaError, fetch_spaces_configuration,
-                        iter_report_lines)
+                        StarlingSchemaError, build_report_payload,
+                        fetch_spaces_configuration)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,8 +62,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.account:
         reports = list(_filter_reports(reports, args.account))
 
-    for line in iter_report_lines(reports):
-        print(line)
+    payload = build_report_payload(reports)
+    print(json.dumps(payload, indent=2))
 
     return 0
 
