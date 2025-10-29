@@ -55,12 +55,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             base_url=args.base_url,
             timeout=args.timeout,
         )
-    except StarlingAPIError as exc:
-        print(f"Failed to fetch Spaces: {exc}", file=sys.stderr)
-        return 2
-    except StarlingSchemaError as exc:
-        print(f"Unexpected response schema: {exc}", file=sys.stderr)
-        return 3
+    except (StarlingAPIError, StarlingSchemaError) as exc:
+        return _handle_failure(exc)
 
     if args.account:
         reports = list(_filter_reports(reports, args.account))
@@ -86,6 +82,17 @@ def _filter_reports(
         return list(reports)
     allowed = set(allowed_uids)
     return [report for report in reports if report.account_uid in allowed]
+
+
+def _handle_failure(exc: Exception) -> int:
+    if isinstance(exc, StarlingSchemaError):
+        message = f"Unexpected response schema: {exc}"
+        code = 3
+    else:
+        message = f"Failed to fetch Spaces: {exc}"
+        code = 2
+    print(message, file=sys.stderr)
+    return code
 
 
 if __name__ == "__main__":

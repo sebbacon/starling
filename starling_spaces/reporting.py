@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
@@ -171,63 +171,64 @@ def iter_report_lines(reports: Sequence[AccountReport]) -> Iterable[str]:
 def _parse_money(value: Any, *, default_currency: Optional[str] = None) -> Optional[Money]:
     if value is None:
         return None
-
     if isinstance(value, Money):
         return value
-
     if isinstance(value, dict):
-        currency = value.get("currency") or value.get("currencyCode") or default_currency
-        minor_units = value.get("minorUnits") or value.get("minorUnit")
-        if currency and minor_units is not None:
-            try:
-                return Money(currency=currency, minor_units=int(minor_units))
-            except (TypeError, ValueError):
-                return None
-
-        amount = value.get("amount") or value.get("value")
-        if currency and amount is not None:
-            try:
-                minor_units = int((Decimal(str(amount))) * 100)
-                return Money(currency=currency, minor_units=minor_units)
-            except (ArithmeticError, ValueError):
-                return None
-
-        for candidate in MONEY_KEY_CANDIDATES:
-            nested_value = value.get(candidate)
-            if nested_value is value:
-                continue
-            money = _parse_money(
-                nested_value,
-                default_currency=currency or default_currency,
-            )
-            if money:
-                return money
-
-        currency_key, units_key = _find_currency_minor_pair(value)
-        if currency_key and units_key:
-            try:
-                return Money(
-                    currency=str(value[currency_key]),
-                    minor_units=int(value[units_key]),
-                )
-            except (TypeError, ValueError):
-                return None
-
-    elif isinstance(value, (int, float)) and default_currency:
-        try:
-            decimal_value = Decimal(str(value))
-        except (ArithmeticError, ValueError):
-            return None
-        return Money(currency=default_currency, minor_units=int(decimal_value))
-
-    elif isinstance(value, str) and default_currency:
-        try:
-            decimal_value = Decimal(value)
-        except (ArithmeticError, ValueError):
-            return None
-        return Money(currency=default_currency, minor_units=int(decimal_value))
-
+        return _money_from_dict(value, default_currency)
+    if default_currency and isinstance(value, (int, float, str)):
+        return _money_from_scalar(value, default_currency)
     return None
+
+
+def _money_from_dict(data: Dict[str, Any], default_currency: Optional[str]) -> Optional[Money]:
+    currency = data.get("currency") or data.get("currencyCode") or default_currency
+    minor_units = data.get("minorUnits") or data.get("minorUnit")
+    if currency and minor_units is not None:
+        try:
+            return Money(currency=currency, minor_units=int(minor_units))
+        except (TypeError, ValueError):
+            return None
+
+    amount = data.get("amount") or data.get("value")
+    if currency and amount is not None:
+        try:
+            cents = int(Decimal(str(amount)) * 100)
+            return Money(currency=currency, minor_units=cents)
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    for candidate in MONEY_KEY_CANDIDATES:
+        if candidate not in data:
+            continue
+        nested_value = data[candidate]
+        if nested_value is data:
+            continue
+        money = _parse_money(nested_value, default_currency=currency or default_currency)
+        if money:
+            return money
+
+    currency_key, units_key = _find_currency_minor_pair(data)
+    if currency_key and units_key:
+        try:
+            return Money(
+                currency=str(data[currency_key]),
+                minor_units=int(data[units_key]),
+            )
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _money_from_scalar(value: Any, currency: str) -> Optional[Money]:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    try:
+        minor_units = int(decimal_value)
+    except (TypeError, ValueError):
+        return None
+    return Money(currency=currency, minor_units=minor_units)
 
 
 def _find_currency_minor_pair(data: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -267,31 +268,14 @@ def _parse_space(item: Dict[str, Any], *, account_currency: Optional[str]) -> Sp
         or account_currency
     )
 
-    balance = None
-    for key in BALANCE_KEYS:
-        if key in item:
-            balance = _parse_money(item.get(key), default_currency=currency_hint)
-            if balance:
-                break
+    balance = _first_money(item, BALANCE_KEYS, currency_hint)
     if not balance:
         raise StarlingSchemaError(
             f"Missing recognised balance for space {uid}; keys present: {sorted(item.keys())}"
         )
 
-    goal_amount = None
-    for key in GOAL_KEYS:
-        if key in item:
-            money = _parse_money(item.get(key), default_currency=currency_hint)
-            if money:
-                goal_amount = money
-                break
-
-    settings: Dict[str, Any] = {}
-    if isinstance(item.get("settings"), dict):
-        settings.update(item["settings"])
-    for key in ("roundUpMultiplier", "sweepEnabled", "spendProportion"):
-        if key in item and key not in settings:
-            settings[key] = item[key]
+    goal_amount = _first_money(item, GOAL_KEYS, currency_hint)
+    settings = _collect_settings(item)
 
     return Space(
         uid=uid,
@@ -302,6 +286,31 @@ def _parse_space(item: Dict[str, Any], *, account_currency: Optional[str]) -> Sp
         settings=settings,
         raw=item,
     )
+
+
+def _first_money(
+    container: Dict[str, Any],
+    keys: Tuple[str, ...],
+    currency_hint: Optional[str],
+) -> Optional[Money]:
+    for key in keys:
+        if key not in container:
+            continue
+        money = _parse_money(container.get(key), default_currency=currency_hint)
+        if money:
+            return money
+    return None
+
+
+def _collect_settings(item: Dict[str, Any]) -> Dict[str, Any]:
+    settings: Dict[str, Any] = {}
+    base_settings = item.get("settings")
+    if isinstance(base_settings, dict):
+        settings.update(base_settings)
+    for key in ("roundUpMultiplier", "sweepEnabled", "spendProportion"):
+        if key in item and key not in settings:
+            settings[key] = item[key]
+    return settings
 
 
 def _request_json(client: httpx.Client, method: str, url: str) -> Dict[str, Any]:
@@ -331,19 +340,17 @@ def _extract_error_message(response: httpx.Response) -> str:
 
 
 def _extract_accounts(data: Dict[str, Any]) -> Sequence[Dict[str, Any]]:
-    if not isinstance(data, dict):
-        return []
-    for key in ("accounts", "accountList"):
-        value = data.get(key)
-        if isinstance(value, list):
-            return value
-    return []
+    return _extract_list(data, ("accounts", "accountList"))
 
 
 def _extract_spaces(data: Dict[str, Any]) -> Sequence[Dict[str, Any]]:
+    return _extract_list(data, ("spaces", "spaceList", "savingsGoals"))
+
+
+def _extract_list(data: Dict[str, Any], keys: Tuple[str, ...]) -> Sequence[Dict[str, Any]]:
     if not isinstance(data, dict):
         return []
-    for key in ("spaces", "spaceList", "savingsGoals"):
+    for key in keys:
         value = data.get(key)
         if isinstance(value, list):
             return value
