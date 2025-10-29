@@ -8,3 +8,6 @@ clean:
 
 test:
     PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run pytest
+
+report *args:
+    PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python -m starling_spaces.cli {{args}}
