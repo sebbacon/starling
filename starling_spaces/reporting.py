@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
 
 API_BASE_URL = "https://api.starlingbank.com"
+RETRYABLE_STATUS_CODES: Tuple[int, ...] = (429, 500, 502, 503, 504)
+MIN_RETRY_DELAY_SECONDS = 0.5
+MAX_BACKOFF_SECONDS = 5.0
 
 
 class StarlingAPIError(RuntimeError):
@@ -116,7 +122,13 @@ def fetch_spaces_configuration(
         "Accept": "application/json",
     }
     with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
-        accounts_data = _request_json(client, "GET", "/api/v2/accounts")
+        accounts_data = _request_json(
+            client,
+            "GET",
+            "/api/v2/accounts",
+            max_attempts=3,
+            retry_statuses=RETRYABLE_STATUS_CODES,
+        )
         account_items = _extract_accounts(accounts_data)
         reports: List[AccountReport] = []
         for account in account_items:
@@ -128,6 +140,8 @@ def fetch_spaces_configuration(
                 client,
                 "GET",
                 f"/api/v2/account/{account_uid}/spaces",
+                max_attempts=3,
+                retry_statuses=RETRYABLE_STATUS_CODES,
             )
             space_items = _extract_spaces(spaces_data)
             spaces: List[Space] = []
@@ -364,7 +378,13 @@ def _fetch_recurring_transfer(
 ) -> Optional[RecurringTransfer]:
     url = f"/api/v2/account/{account_uid}/savings-goals/{space_uid}/recurring-transfer"
     try:
-        data = _request_json(client, "GET", url)
+        data = _request_json(
+            client,
+            "GET",
+            url,
+            max_attempts=3,
+            retry_statuses=RETRYABLE_STATUS_CODES,
+        )
     except StarlingAPIError as exc:
         if exc.status_code == 404:
             return None
@@ -406,18 +426,62 @@ def _parse_recurring_transfer(
     )
 
 
-def _request_json(client: httpx.Client, method: str, url: str) -> Dict[str, Any]:
+def _request_json(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    max_attempts: int = 1,
+    retry_statuses: Tuple[int, ...] = (),
+) -> Dict[str, Any]:
+    attempt = 0
+    while True:
+        try:
+            response = client.request(method, url)
+        except httpx.HTTPError as exc:
+            raise StarlingAPIError(f"Network error: {exc}") from exc
+
+        if response.status_code in retry_statuses and attempt < max_attempts - 1:
+            delay = _retry_delay(response, attempt)
+            time.sleep(delay)
+            attempt += 1
+            continue
+
+        if response.status_code >= 400:
+            message = _extract_error_message(response)
+            raise StarlingAPIError(message, status_code=response.status_code)
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise StarlingAPIError("Response was not valid JSON") from exc
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        parsed = _parse_retry_after(retry_after)
+        if parsed is not None:
+            return max(parsed, MIN_RETRY_DELAY_SECONDS)
+    return min((2 ** attempt), MAX_BACKOFF_SECONDS)
+
+
+def _parse_retry_after(value: str) -> Optional[float]:
     try:
-        response = client.request(method, url)
-    except httpx.HTTPError as exc:
-        raise StarlingAPIError(f"Network error: {exc}") from exc
-    if response.status_code >= 400:
-        message = _extract_error_message(response)
-        raise StarlingAPIError(message, status_code=response.status_code)
+        return float(value)
+    except (TypeError, ValueError):
+        pass
     try:
-        return response.json()
-    except ValueError as exc:
-        raise StarlingAPIError("Response was not valid JSON") from exc
+        retry_time = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_time is None:
+        return None
+    if retry_time.tzinfo is None:
+        retry_time = retry_time.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    delta = (retry_time - now).total_seconds()
+    return delta if delta > 0 else None
 
 
 def _extract_error_message(response: httpx.Response) -> str:

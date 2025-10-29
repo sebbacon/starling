@@ -1,5 +1,6 @@
 import pytest
 import respx
+from httpx import Response
 
 from starling_spaces import cli as spaces_cli
 from starling_spaces.reporting import (AccountReport, Money, Space,
@@ -50,18 +51,28 @@ def test_fetches_spaces_configuration_and_formats_lines(respx_mock):
     )
     respx_mock.get(
         "https://api.starlingbank.com/api/v2/account/acc-123/savings-goals/space-1/recurring-transfer"
-    ).respond(
-        json={
-            "transferUid": "tx-1",
-            "recurrenceRule": {
-                "frequency": "MONTHLY",
-                "interval": 1,
-            },
-            "currencyAndAmount": {"currency": "GBP", "minorUnits": 30000},
-            "nextPaymentDate": "2025-11-02",
-            "topUp": True,
-            "reference": "Budget top-up",
-        }
+    ).mock(
+        side_effect=[
+            Response(
+                429,
+                json={"error": "rate limited"},
+                headers={"Retry-After": "0.1"},
+            ),
+            Response(
+                200,
+                json={
+                    "transferUid": "tx-1",
+                    "recurrenceRule": {
+                        "frequency": "MONTHLY",
+                        "interval": 1,
+                    },
+                    "currencyAndAmount": {"currency": "GBP", "minorUnits": 30000},
+                    "nextPaymentDate": "2025-11-02",
+                    "topUp": True,
+                    "reference": "Budget top-up",
+                },
+            ),
+        ]
     )
     respx_mock.get(
         "https://api.starlingbank.com/api/v2/account/acc-123/savings-goals/space-2/recurring-transfer"
