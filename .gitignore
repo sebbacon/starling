@@ -1,0 +1,7 @@
+.env
+.venv/
+.uv_cache/
+.uv_tools/
+__pycache__/
+.python-version
+.nvmrc

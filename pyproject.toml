@@ -1,0 +1,19 @@
+[project]
+name = "starling"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "pytest>=8.4.2",
+    "python-dotenv>=1.2.1",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "isort>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "respx>=0.22.0",
+    "ruff>=0.14.2",
+]
