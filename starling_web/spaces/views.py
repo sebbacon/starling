@@ -126,6 +126,7 @@ def spending_transactions(request):
                 "spaceName": space_name or "",
                 "source": item.source or "",
                 "classificationReason": item.classification_reason or "",
+                "category": item.classified_category or "Uncategorised",
             }
         )
 

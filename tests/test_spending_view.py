@@ -200,6 +200,7 @@ def test_spending_transactions_returns_matching_rows(settings):
     assert ids == ["item-main", "item-space"]
     assert payload["transactions"][0]["amountMinorUnits"] == 3000
     assert payload["transactions"][1]["amountMinorUnits"] == 5000
+    assert payload["transactions"][0]["category"] == "Shopping"
 
 
 def test_spending_transactions_requires_category():
