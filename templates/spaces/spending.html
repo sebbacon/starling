@@ -9,9 +9,6 @@
   </header>
 
   <style>
-    .spending-table tbody tr.active {
-      background: #eef4ff;
-    }
     #transactions-card[hidden] {
       display: none;
     }
@@ -56,19 +53,6 @@
     <canvas id="spending-chart" height="320"></canvas>
   </section>
 
-  <section class="card">
-    <table id="spending-table" class="spending-table">
-      <thead>
-        <tr>
-          <th scope="col">Category</th>
-          <th scope="col">Monthly average</th>
-          <th scope="col">Total</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
-
   <section class="card" id="transactions-card" hidden>
     <div class="transactions-header">
       <h2 id="transactions-title">Transactions</h2>
@@ -105,46 +89,6 @@
         throw new Error('Unable to load spending data');
       }
       return response.json();
-    }
-
-    function renderTable(series, selectedCategory) {
-      const table = document.getElementById('spending-table');
-      const tbody = table.querySelector('tbody');
-      tbody.innerHTML = '';
-
-      if (!series.length) {
-        const row = document.createElement('tr');
-        const cell = document.createElement('td');
-        cell.colSpan = 3;
-        cell.textContent = 'No spend recorded for this window.';
-        row.appendChild(cell);
-        tbody.appendChild(row);
-        return;
-      }
-
-      series.forEach((item, index) => {
-        const row = document.createElement('tr');
-        row.dataset.category = item.category;
-        if (selectedCategory && item.category === selectedCategory) {
-          row.classList.add('active');
-        }
-
-        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
-
-        const nameCell = document.createElement('td');
-        nameCell.innerHTML = `<span style="display:inline-flex;align-items:center;gap:0.6rem;"><span style="width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;"></span><strong>${item.category}</strong></span>`;
-        row.appendChild(nameCell);
-
-        const averageCell = document.createElement('td');
-        averageCell.textContent = formatter.format(item.averageMinorUnits / 100);
-        row.appendChild(averageCell);
-
-        const totalCell = document.createElement('td');
-        totalCell.textContent = formatter.format(item.totalMinorUnits / 100);
-        row.appendChild(totalCell);
-
-        tbody.appendChild(row);
-      });
     }
 
     function renderTransactions(category, transactions) {
@@ -249,9 +193,6 @@
         chartInstance.update();
       }
       clearTransactions();
-      if (spendingSummary) {
-        renderTable(spendingSummary.series, activeCategory);
-      }
     }
 
     function handleChartClick(event) {
@@ -285,7 +226,6 @@
         ds.hidden = index !== datasetIndex;
       });
       chartInstance.update();
-      renderTable(spendingSummary.series, activeCategory);
       void loadTransactions(selectedLabel);
     }
 
@@ -338,7 +278,6 @@
       document.getElementById('spending-chart').addEventListener('click', handleChartClick);
       document.getElementById('reset-selection').addEventListener('click', resetSelection);
       clearTransactions();
-      renderTable(spendingSummary.series, activeCategory);
     }
 
     document.addEventListener('DOMContentLoaded', renderChart);
