@@ -61,11 +61,11 @@
     <table id="transaction-table">
       <thead>
         <tr>
-          <th scope="col">Date</th>
-          <th scope="col">Counterparty</th>
-          <th scope="col">Space</th>
-          <th scope="col">Source</th>
-          <th scope="col" class="numeric">Amount</th>
+          <th scope="col" data-sort-key="transactionTime" aria-sort="descending">Date</th>
+          <th scope="col" data-sort-key="counterparty" aria-sort="none">Counterparty</th>
+          <th scope="col" data-sort-key="spaceName" aria-sort="none">Space</th>
+          <th scope="col" data-sort-key="source" aria-sort="none">Source</th>
+          <th scope="col" class="numeric" data-sort-key="amountMinorUnits" aria-sort="none">Amount</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -82,6 +82,10 @@
     let spendingSummary = null;
     let chartInstance = null;
     let activeCategory = null;
+    let currentCategoryLabel = '';
+    let currentTransactions = [];
+    let currentTransactionsMessage = null;
+    const sortState = { column: 'transactionTime', direction: 'desc' };
 
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
@@ -91,74 +95,126 @@
       return response.json();
     }
 
-    function renderTransactions(category, transactions) {
+    function sortTransactions(data) {
+      const { column, direction } = sortState;
+      const sorted = [...data];
+      sorted.sort((a, b) => {
+        let result = 0;
+        if (column === 'transactionTime') {
+          result = new Date(a[column]).getTime() - new Date(b[column]).getTime();
+        } else if (column === 'amountMinorUnits') {
+          result = (a[column] || 0) - (b[column] || 0);
+        } else {
+          result = (a[column] || '').localeCompare(b[column] || '', undefined, { sensitivity: 'base' });
+        }
+        return direction === 'asc' ? result : -result;
+      });
+      return sorted;
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        if (!currentCategoryLabel || currentTransactionsMessage) {
+          th.setAttribute('aria-sort', 'none');
+          return;
+        }
+        const key = th.dataset.sortKey;
+        if (key === sortState.column) {
+          th.setAttribute('aria-sort', sortState.direction === 'asc' ? 'ascending' : 'descending');
+        } else {
+          th.setAttribute('aria-sort', 'none');
+        }
+      });
+    }
+
+    function renderTransactionsTable() {
       const card = document.getElementById('transactions-card');
       const title = document.getElementById('transactions-title');
       const tbody = document.querySelector('#transaction-table tbody');
 
-      title.textContent = transactions.length
-        ? `Transactions: ${category}`
-        : `No transactions for ${category}`;
+      if (!currentCategoryLabel) {
+        card.hidden = true;
+        updateSortIndicators();
+        return;
+      }
+
+      card.hidden = false;
+      title.textContent = `Transactions: ${currentCategoryLabel}`;
 
       tbody.innerHTML = '';
 
-      if (!transactions.length) {
+      if (currentTransactionsMessage) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 5;
+        cell.textContent = currentTransactionsMessage;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        updateSortIndicators();
+        return;
+      }
+
+      if (!currentTransactions.length) {
         const row = document.createElement('tr');
         const cell = document.createElement('td');
         cell.colSpan = 5;
         cell.textContent = 'No transactions recorded for this category in the selected window.';
         row.appendChild(cell);
         tbody.appendChild(row);
-      } else {
-        transactions.forEach((txn) => {
-          const row = document.createElement('tr');
-
-          const dateCell = document.createElement('td');
-          dateCell.textContent = new Date(txn.transactionTime).toLocaleString('en-GB', {
-            dateStyle: 'short',
-            timeStyle: 'short',
-          });
-          row.appendChild(dateCell);
-
-          const counterpartyCell = document.createElement('td');
-          counterpartyCell.textContent = txn.counterparty || '—';
-          row.appendChild(counterpartyCell);
-
-          const spaceCell = document.createElement('td');
-          spaceCell.textContent = txn.spaceName || txn.spaceUid || '—';
-          row.appendChild(spaceCell);
-
-          const sourceCell = document.createElement('td');
-          sourceCell.textContent = txn.source || '—';
-          row.appendChild(sourceCell);
-
-          const amountCell = document.createElement('td');
-          amountCell.classList.add('numeric');
-          const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
-          amountCell.textContent = formatter.format(txn.amountMinorUnits / 100);
-          row.appendChild(amountCell);
-
-          tbody.appendChild(row);
-        });
+        updateSortIndicators();
+        return;
       }
 
-      card.hidden = false;
+      const sorted = sortTransactions(currentTransactions);
+
+      sorted.forEach((txn) => {
+        const row = document.createElement('tr');
+
+        const dateCell = document.createElement('td');
+        dateCell.textContent = new Date(txn.transactionTime).toLocaleString('en-GB', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        });
+        row.appendChild(dateCell);
+
+        const counterpartyCell = document.createElement('td');
+        counterpartyCell.textContent = txn.counterparty || '—';
+        row.appendChild(counterpartyCell);
+
+        const spaceCell = document.createElement('td');
+        spaceCell.textContent = txn.spaceName || txn.spaceUid || '—';
+        row.appendChild(spaceCell);
+
+        const sourceCell = document.createElement('td');
+        sourceCell.textContent = txn.source || '—';
+        row.appendChild(sourceCell);
+
+        const amountCell = document.createElement('td');
+        amountCell.classList.add('numeric');
+        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
+        amountCell.textContent = formatter.format((txn.amountMinorUnits || 0) / 100);
+        row.appendChild(amountCell);
+
+        tbody.appendChild(row);
+      });
+
+      updateSortIndicators();
     }
 
     function showTransactionsLoading(category) {
-      const card = document.getElementById('transactions-card');
-      const title = document.getElementById('transactions-title');
-      const tbody = document.querySelector('#transaction-table tbody');
-      title.textContent = `Transactions: ${category}`;
-      tbody.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
-      card.hidden = false;
+      currentCategoryLabel = category;
+      currentTransactions = [];
+      currentTransactionsMessage = 'Loading…';
+      sortState.column = 'transactionTime';
+      sortState.direction = 'desc';
+      renderTransactionsTable();
     }
 
     function clearTransactions() {
-      const card = document.getElementById('transactions-card');
-      const tbody = document.querySelector('#transaction-table tbody');
-      tbody.innerHTML = '';
-      card.hidden = true;
+      currentCategoryLabel = '';
+      currentTransactions = [];
+      currentTransactionsMessage = null;
+      renderTransactionsTable();
     }
 
     async function loadTransactions(category) {
@@ -177,10 +233,15 @@
           throw new Error('Failed to fetch transactions');
         }
         const payload = await response.json();
-        renderTransactions(category, payload.transactions || []);
+        currentCategoryLabel = category;
+        currentTransactions = payload.transactions || [];
+        currentTransactionsMessage = null;
+        renderTransactionsTable();
       } catch (error) {
-        const tbody = document.querySelector('#transaction-table tbody');
-        tbody.innerHTML = '<tr><td colspan="5">Unable to load transactions. Please try again.</td></tr>';
+        currentCategoryLabel = category;
+        currentTransactions = [];
+        currentTransactionsMessage = 'Unable to load transactions. Please try again.';
+        renderTransactionsTable();
       }
     }
 
@@ -193,6 +254,22 @@
         chartInstance.update();
       }
       clearTransactions();
+    }
+
+    function handleSortClick(event) {
+      const key = event.currentTarget.dataset.sortKey;
+      if (!key || !currentCategoryLabel || currentTransactionsMessage) {
+        return;
+      }
+
+      if (sortState.column === key) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortState.column = key;
+        sortState.direction = key === 'transactionTime' ? 'desc' : 'asc';
+      }
+
+      renderTransactionsTable();
     }
 
     function handleChartClick(event) {
@@ -277,6 +354,9 @@
 
       document.getElementById('spending-chart').addEventListener('click', handleChartClick);
       document.getElementById('reset-selection').addEventListener('click', resetSelection);
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        th.addEventListener('click', handleSortClick);
+      });
       clearTransactions();
     }
 
