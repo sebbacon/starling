@@ -23,3 +23,6 @@ average-spend *args:
 
 coverage:
     PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run pytest --cov=starling_web --cov=starling_spaces --cov-report=term-missing
+
+reclassify-transactions *args:
+    PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py reclassify_transactions {{args}}
