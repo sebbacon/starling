@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 import pytest
 import respx
@@ -233,3 +234,62 @@ def test_cli_surfaces_schema_errors(monkeypatch, capsys):
     assert exit_code == 3
     captured = capsys.readouterr()
     assert "Unexpected response schema" in captured.err
+
+
+def test_cli_average_spend_outputs_categories(monkeypatch, tmp_path, capsys):
+    db_path = tmp_path / "avg.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE categories (account_uid TEXT, category_type TEXT, category_uid TEXT, space_uid TEXT, name TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE feed_items (feed_item_uid TEXT, account_uid TEXT, category_uid TEXT, space_uid TEXT, direction TEXT, amount_minor_units INTEGER, currency TEXT, transaction_time TEXT, source TEXT, counterparty TEXT, spending_category TEXT, raw_json TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE sync_state (account_uid TEXT, category_uid TEXT, last_transaction_time TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO categories VALUES ('acc-1', 'space', 'space-1', 'space-1', 'Space One')"
+    )
+    conn.execute(
+        "INSERT INTO categories VALUES ('acc-1', 'spending', 'SHOPPING', NULL, 'Shopping')"
+    )
+    conn.execute(
+        """
+        INSERT INTO feed_items VALUES (
+            'item-1',
+            'acc-1',
+            'space-1',
+            'space-1',
+            'OUT',
+            -2500,
+            'GBP',
+            '2024-11-10T12:00:00+00:00',
+            NULL,
+            'Merchant',
+            'SHOPPING',
+            '{}'
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(spaces_cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(spaces_cli, "_get_token", lambda: None)
+
+    exit_code = spaces_cli.main(
+        [
+            "average-spend",
+            "--db",
+            str(db_path),
+            "--reference-time",
+            "2024-11-15T00:00:00+00:00",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert any(item["spaceUid"] == "space-1" for item in data["spaces"])
+    assert any(item["category"] == "SHOPPING" for item in data["spendingCategories"])
+    assert "accountBalances" not in data

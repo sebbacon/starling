@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Sequence
 from dotenv import load_dotenv
 
 from .ingestion import (DEFAULT_DB_PATH, calculate_average_spend,
-                        sync_space_feeds)
+                        fetch_account_balances, sync_space_feeds)
 from .reporting import (API_BASE_URL, AccountReport, StarlingAPIError,
                         StarlingSchemaError, build_report_payload,
                         fetch_spaces_configuration)
@@ -85,11 +85,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     command = args.command or "report"
 
     if command == "average-spend":
+        reference_time = _parse_reference_time(args.reference_time)
         summary = calculate_average_spend(
             db_path=args.db,
             days=args.days,
-            reference_time=_parse_reference_time(args.reference_time),
+            reference_time=reference_time,
         )
+
+        load_dotenv()
+        token = _get_token()
+        if token:
+            account_uids = {
+                item["accountUid"] for item in summary.get("spaces", [])
+            }
+            account_uids.update(
+                item["accountUid"] for item in summary.get("spendingCategories", [])
+            )
+            if account_uids:
+                try:
+                    balances = fetch_account_balances(
+                        token,
+                        account_uids,
+                        base_url=args.base_url,
+                        timeout=args.timeout,
+                    )
+                except StarlingAPIError as exc:
+                    summary.setdefault("errors", []).append(
+                        f"Failed to fetch account balances: {exc}"
+                    )
+                else:
+                    summary["accountBalances"] = balances
+
         print(json.dumps(summary, indent=2))
         return 0
 

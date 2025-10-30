@@ -178,3 +178,7 @@ def test_sync_space_feeds_persists_feed_items(tmp_path, respx_mock):
     assert summary_by_space["space-1"]["averageDailySpendMinorUnits"] == 67
     assert summary_by_space["space-2"]["totalOutflowMinorUnits"] == 1000
     assert summary_by_space["space-2"]["averageDailySpendMinorUnits"] == 33
+
+    spending = {item["category"]: item for item in summary["spendingCategories"]}
+    assert spending["SHOPPING"]["outflowCount"] == 1
+    assert spending["ENTERTAINMENT"]["totalOutflowMinorUnits"] == 1000

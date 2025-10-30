@@ -23,8 +23,8 @@ The repo already includes helper tasks via `just`:
 
 - `just test` – run the pytest suite
 - `just clean` – auto-format with Ruff and isort
-- `just ingest -- --db data/starling_feeds.db` – pull feed history for every space into `data/starling_feeds.db`
-- `just average-spend -- --db data/starling_feeds.db` – compute spend averages from the ingested data (supports `--days` and `--reference-time`)
+- `just ingest -- --db data/starling_feeds.db` – pull feed history (including spending categories) for every space into `data/starling_feeds.db`
+- `just average-spend -- --db data/starling_feeds.db` – compute spend averages for each space *and* spending category, and report the latest account balances (supports `--days` and `--reference-time`)
 
 ## Usage
 

@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 
@@ -70,6 +70,7 @@ def calculate_average_spend(
     db_path: Path | str = DEFAULT_DB_PATH,
     days: int = 30,
     reference_time: Optional[datetime] = None,
+    account_balances: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if days <= 0:
         raise ValueError("days must be positive")
@@ -80,7 +81,8 @@ def calculate_average_spend(
     start = reference - timedelta(days=days)
     with sqlite3.connect(database) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
+        conn.row_factory = sqlite3.Row
+        space_rows = conn.execute(
             """
             SELECT
                 c.account_uid,
@@ -107,8 +109,36 @@ def calculate_average_spend(
             (start.isoformat(), reference.isoformat()),
         ).fetchall()
 
+        category_rows = conn.execute(
+            """
+            SELECT
+                c.account_uid,
+                c.category_uid,
+                c.name,
+                c.category_type,
+                COALESCE(
+                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN -fi.amount_minor_units ELSE 0 END),
+                    0
+                ) AS total_outflow_minor,
+                COALESCE(
+                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN 1 ELSE 0 END),
+                    0
+                ) AS outflow_count
+            FROM categories c
+            LEFT JOIN feed_items fi
+              ON fi.account_uid = c.account_uid
+             AND fi.spending_category = c.category_uid
+             AND fi.transaction_time >= ?
+             AND fi.transaction_time < ?
+            WHERE c.category_type = 'spending'
+            GROUP BY c.account_uid, c.category_uid, c.name, c.category_type
+            ORDER BY c.account_uid, c.category_uid
+            """,
+            (start.isoformat(), reference.isoformat()),
+        ).fetchall()
+
     spaces: List[Dict[str, Any]] = []
-    for row in rows:
+    for row in space_rows:
         total_outflow = int(row["total_outflow_minor"])
         avg_minor = _average_minor_units(total_outflow, days)
         spaces.append(
@@ -129,7 +159,39 @@ def calculate_average_spend(
                 "outflowCount": int(row["outflow_count"]),
             }
         )
-    return {"spaces": spaces}
+
+    spending_categories: List[Dict[str, Any]] = []
+    for row in category_rows:
+        total_outflow = int(row["total_outflow_minor"])
+        avg_minor = _average_minor_units(total_outflow, days)
+        spending_categories.append(
+            {
+                "accountUid": row["account_uid"],
+                "category": row["category_uid"],
+                "name": row["name"],
+                "currency": ASSUMED_CURRENCY,
+                "days": days,
+                "totalOutflowMinorUnits": total_outflow,
+                "totalOutflowFormatted": _format_minor_units(
+                    ASSUMED_CURRENCY, total_outflow
+                ),
+                "averageDailySpendMinorUnits": avg_minor,
+                "averageDailySpendFormatted": _format_minor_units(
+                    ASSUMED_CURRENCY, avg_minor
+                ),
+                "outflowCount": int(row["outflow_count"]),
+            }
+        )
+
+    result: Dict[str, Any] = {
+        "spaces": spaces,
+        "spendingCategories": spending_categories,
+    }
+
+    if account_balances is not None:
+        result["accountBalances"] = account_balances
+
+    return result
 
 
 def _average_minor_units(total_outflow: int, days: int) -> int:
@@ -146,6 +208,52 @@ def _average_minor_units(total_outflow: int, days: int) -> int:
 def _format_minor_units(currency: str, minor_units: int) -> str:
     amount = minor_units / 100
     return f"{currency} {amount:,.2f}"
+
+
+def fetch_account_balances(
+    token: str,
+    account_uids: Sequence[str],
+    *,
+    base_url: str = API_BASE_URL,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    unique = sorted({uid for uid in account_uids if uid})
+    if not unique:
+        return {}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    balances: Dict[str, Any] = {}
+    with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
+        for account_uid in unique:
+            data = _request_json(
+                client,
+                "GET",
+                f"/api/v2/accounts/{account_uid}/balance",
+                max_attempts=3,
+                retry_statuses=RETRYABLE_STATUS_CODES,
+            )
+            money = _parse_money(
+                data.get("effectiveBalance"), default_currency=ASSUMED_CURRENCY
+            )
+            if not money:
+                money = _parse_money(
+                    data.get("clearedBalance"), default_currency=ASSUMED_CURRENCY
+                )
+            if money:
+                currency = money.currency
+                minor_units = money.minor_units
+            else:
+                currency = ASSUMED_CURRENCY
+                minor_units = 0
+            balances[account_uid] = {
+                "currency": currency,
+                "minorUnits": minor_units,
+                "formatted": _format_minor_units(currency, minor_units),
+                "raw": data,
+            }
+    return balances
 
 
 def _sync_account_spaces(
