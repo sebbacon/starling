@@ -127,6 +127,7 @@ def spending_transactions(request):
                 "source": item.source or "",
                 "classificationReason": item.classification_reason or "",
                 "category": item.classified_category or "Uncategorised",
+                "raw": item.raw_json or {},
             }
         )
 
