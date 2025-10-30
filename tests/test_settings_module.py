@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+import dotenv
 
 
 SETTINGS_PATH = Path(__file__).resolve().parent.parent / "starling_web" / "starling_web" / "settings.py"
@@ -15,6 +16,8 @@ def _load_settings_with_env(env):
     if loader is None:
         raise RuntimeError("Unable to load settings module")
     with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("PYTHON_DOTENV_DISABLE", "1")
+        patch.setattr(dotenv, "load_dotenv", lambda *_, **__: False)
         for key, default in {
             "DJANGO_SECRET_KEY": "secret",
             "DJANGO_DEBUG": "1",

@@ -36,6 +36,8 @@ just dev -- 0.0.0.0:8000
 
 Visit `http://localhost:8000/` to view the summary. The homepage uses htmx to refresh the metrics without a full page reload.
 
+Navigate to `http://localhost:8000/spending/` for a stacked spending chart grouped by preferred categories (spaces first, falling back to transaction categories).
+
 ### Management commands
 
 ```bash

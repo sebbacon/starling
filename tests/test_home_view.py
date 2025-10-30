@@ -20,6 +20,7 @@ def test_homepage_displays_summary(sample_feed_database, settings):
     assert "Space One" in content
     assert "Average daily spend" in content
     assert "hx-get" in content
+    assert "href=\"/spending/\"" in content
 
 
 def test_summary_partial_returns_fragment(sample_feed_database, settings):

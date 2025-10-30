@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Spending Overview{% endblock %}
+
+{% block content %}
+  <header>
+    <h1>Spending Overview</h1>
+    <p>Stacked view of actual spend grouped by category over the last {{ summary_days }} days.</p>
+  </header>
+
+  <section class="card">
+    <canvas id="spending-chart" height="320"></canvas>
+  </section>
+
+  <section class="card" id="spending-legend"></section>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script>
+    const palette = [
+      '#35b779', '#31688e', '#fde725', '#440154', '#f8961e', '#577590', '#43aa8b', '#f9c74f', '#90be6d', '#f3722c'
+    ];
+
+    async function loadSpendingData() {
+      const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
+      if (!response.ok) {
+        throw new Error('Unable to load spending data');
+      }
+      return response.json();
+    }
+
+    function renderLegend(element, series) {
+      if (!series.length) {
+        element.innerHTML = '<p>No spend recorded for this window.</p>';
+        return;
+      }
+      const items = series
+        .map((item, index) => {
+          const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
+          const total = formatter.format(item.totalMinorUnits / 100);
+          return `<div style="display:flex;align-items:center;margin-bottom:0.4rem;">
+            <span style="width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;margin-right:0.6rem;"></span>
+            <span><strong>${item.category}</strong> &mdash; ${total}</span>
+          </div>`;
+        })
+        .join('');
+      element.innerHTML = items;
+    }
+
+    async function renderChart() {
+      const data = await loadSpendingData();
+      const ctx = document.getElementById('spending-chart').getContext('2d');
+      const datasets = data.series.map((item, index) => ({
+        label: item.category,
+        data: item.values,
+        backgroundColor: palette[index % palette.length],
+        stack: 'spend-stack',
+        currency: item.currency || 'GBP'
+      }));
+
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: data.dates,
+          datasets
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const value = context.raw || 0;
+                  const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: context.dataset.currency });
+                  return `${context.dataset.label}: ${formatter.format(value)}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: { stacked: true },
+            y: {
+              stacked: true,
+              ticks: {
+                callback: function(value) {
+                  const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: datasets[0]?.currency || 'GBP', maximumFractionDigits: 0 });
+                  return formatter.format(value);
+                }
+              }
+            }
+          }
+        }
+      });
+
+      renderLegend(document.getElementById('spending-legend'), data.series);
+    }
+
+    document.addEventListener('DOMContentLoaded', renderChart);
+  </script>
+{% endblock %}

@@ -12,12 +12,12 @@
         background-color: #101215;
         color: #f8f9fb;
         margin: 0;
-        padding: 1.5rem;
+        padding: 0 1.5rem 1.5rem;
       }
       main {
         max-width: 960px;
         margin: 0 auto;
-      }
+        }
       header {
         margin-bottom: 1.5rem;
       }
@@ -62,10 +62,56 @@
         opacity: 0.6;
         cursor: progress;
       }
+      .nav {
+        background: rgba(16, 24, 39, 0.95);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .nav__inner {
+        max-width: 960px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 0;
+      }
+      .nav__brand {
+        color: #f9fafb;
+        font-weight: 700;
+        text-decoration: none;
+        letter-spacing: 0.02em;
+      }
+      .nav__links {
+        display: flex;
+        gap: 1rem;
+      }
+      .nav__links a {
+        color: #d1d5db;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .nav__links a:hover {
+        color: #34d399;
+      }
+      main {
+        padding-top: 1.5rem;
+      }
     </style>
     {% block head %}{% endblock %}
   </head>
   <body>
+    <header class="nav">
+      <div class="nav__inner">
+        <a class="nav__brand" href="/">Starling Spaces</a>
+        <nav class="nav__links">
+          <a href="/">Overview</a>
+          <a href="/spending/">Spending</a>
+        </nav>
+      </div>
+    </header>
     <main>
       {% block content %}{% endblock %}
     </main>
