@@ -1,18 +1,14 @@
-import sqlite3
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
+from django.db.models import F, Sum
+from django.db.models.functions import TruncMonth, Upper
+
+from starling_web.spaces.models import FeedItem
 
 EXCLUDED_TRANSFER_SOURCES = {"SAVINGS_GOAL", "INTERNAL_TRANSFER"}
 
 
-def calculate_spend_by_category(
-    *,
-    db_path,
-    days: int,
-    reference_time=None,
-):
+def calculate_spend_by_category(*, days: int, reference_time=None):
     if days <= 0:
         raise ValueError("days must be positive")
 
@@ -25,75 +21,53 @@ def calculate_spend_by_category(
     window_start = reference - timedelta(days=days)
     window_end = reference + timedelta(seconds=1)
 
-    database = Path(db_path)
-    with sqlite3.connect(database) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT
-                SUBSTR(fi.transaction_time, 1, 7) AS spend_month,
-                COALESCE(spend.name, space.name, 'Uncategorised') AS category_name,
-                fi.currency AS currency,
-                SUM(-fi.amount_minor_units) AS total_minor
-            FROM feed_items fi
-            LEFT JOIN categories space
-              ON space.account_uid = fi.account_uid
-             AND space.category_type = 'space'
-             AND space.category_uid = fi.space_uid
-            LEFT JOIN categories spend
-              ON spend.account_uid = fi.account_uid
-             AND spend.category_type = 'spending'
-             AND spend.category_uid = fi.spending_category
-            WHERE fi.amount_minor_units < 0
-              AND fi.transaction_time >= ?
-              AND fi.transaction_time < ?
-              AND UPPER(COALESCE(fi.source, '')) NOT IN (?, ?)
-            GROUP BY spend_month, category_name, fi.currency
-            ORDER BY spend_month ASC, category_name ASC
-            """,
-            (
-                window_start.isoformat(),
-                window_end.isoformat(),
-                *sorted(EXCLUDED_TRANSFER_SOURCES),
-            ),
-        ).fetchall()
+    qs = (
+        FeedItem.objects.filter(
+            transaction_time__gte=window_start,
+            transaction_time__lt=window_end,
+            amount_minor_units__lt=0,
+        )
+        .annotate(month=TruncMonth("transaction_time"), source_upper=Upper("source"))
+        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+        .values("month", "classified_category", "currency")
+        .annotate(total_minor=Sum(-F("amount_minor_units")))
+        .order_by("month", "classified_category")
+    )
 
-    months = sorted({row["spend_month"] for row in rows})
+    months = sorted({row["month"].strftime("%Y-%m") for row in qs if row["month"]})
     dates = [f"{month}-01" for month in months]
-    categories = sorted({row["category_name"] for row in rows})
 
-    values = {
-        category: {
-            "minor": [0 for _ in dates],
-            "currency": None,
-        }
-        for category in categories
-    }
-
-    for row in rows:
-        category = row["category_name"]
-        day = f"{row['spend_month']}-01"
-        idx = dates.index(day)
-        values[category]["minor"][idx] = int(row["total_minor"])
-        values[category]["currency"] = row["currency"] or values[category]["currency"]
+    series_accumulator = {}
+    for row in qs:
+        month_key = row["month"].strftime("%Y-%m-01") if row["month"] else None
+        if month_key is None:
+            continue
+        category = row["classified_category"] or "Uncategorised"
+        currency = row["currency"] or "GBP"
+        series_accumulator.setdefault(
+            category,
+            {
+                "currency": currency,
+                "values": {date: 0 for date in dates},
+            },
+        )
+        series_accumulator[category]["values"][month_key] = int(row["total_minor"] or 0)
 
     series = []
-    for category in categories:
-        minor_values = values[category]["minor"]
-        major_values = [round(amount / 100, 2) for amount in minor_values]
-        non_zero_months = [value for value in minor_values if value > 0]
-        month_count = len(minor_values) if minor_values else 0
-        avg_minor = int(sum(minor_values) / month_count) if month_count else 0
-        avg_major = round(avg_minor / 100, 2)
+    for category, payload in sorted(series_accumulator.items()):
+        ordered_minor = [payload["values"][date] for date in dates]
+        total_minor = sum(ordered_minor)
+        month_count = len(ordered_minor) if ordered_minor else 0
+        avg_minor = int(total_minor / month_count) if month_count else 0
         series.append(
             {
                 "category": category,
-                "values": major_values,
-                "minorValues": minor_values,
-                "totalMinorUnits": sum(minor_values),
-                "currency": values[category]["currency"] or "GBP",
+                "values": [round(value / 100, 2) for value in ordered_minor],
+                "minorValues": ordered_minor,
+                "totalMinorUnits": total_minor,
+                "currency": payload["currency"],
                 "averageMinorUnits": avg_minor,
-                "average": avg_major,
+                "average": round(avg_minor / 100, 2),
             }
         )
 

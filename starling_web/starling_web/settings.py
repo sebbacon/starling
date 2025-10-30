@@ -50,7 +50,6 @@ ALLOWED_HOSTS = [
 if not ALLOWED_HOSTS and not DEBUG:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must contain at least one host when DEBUG is false")
 
-STARLING_FEEDS_DB = _resolve_path(_get_env("STARLING_FEEDS_DB"))
 STARLING_SUMMARY_DAYS = int(_get_env("STARLING_SUMMARY_DAYS"))
 if STARLING_SUMMARY_DAYS <= 0:
     raise ImproperlyConfigured("STARLING_SUMMARY_DAYS must be positive")

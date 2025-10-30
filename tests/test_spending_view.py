@@ -1,95 +1,99 @@
 import json
-import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from django.test import Client
 from django.urls import reverse
 
 from starling_spaces.analytics import calculate_spend_by_category
+from starling_web.spaces.models import Category, FeedItem
 
 
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture
-def spend_db(tmp_path):
-    db_path = tmp_path / "spend.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            "CREATE TABLE categories (account_uid TEXT, category_type TEXT, category_uid TEXT, space_uid TEXT, name TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE feed_items (feed_item_uid TEXT, account_uid TEXT, category_uid TEXT, space_uid TEXT, direction TEXT, amount_minor_units INTEGER, currency TEXT, transaction_time TEXT, source TEXT, counterparty TEXT, spending_category TEXT, raw_json TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE sync_state (account_uid TEXT, category_uid TEXT, last_transaction_time TEXT)"
-        )
-        conn.executemany(
-            "INSERT INTO categories VALUES (?, ?, ?, ?, ?)",
-            [
-                ("acc-1", "space", "space-1", "space-1", "Space One"),
-                ("acc-1", "space", "space-2", "space-2", "Space Two"),
-                ("acc-1", "spending", "SHOPPING", None, "Shopping"),
-            ],
-        )
-        conn.executemany(
-            "INSERT INTO feed_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (
-                    "item-space",
-                    "acc-1",
-                    "space-1",
-                    "space-1",
-                    "OUT",
-                    -5000,
-                    "GBP",
-                    "2024-11-10T10:00:00+00:00",
-                    "CARD",
-                    "Merchant",
-                    "SHOPPING",
-                    "{}",
-                ),
-                (
-                    "item-transfer",
-                    "acc-1",
-                    "space-1",
-                    "space-1",
-                    "OUT",
-                    -2000,
-                    "GBP",
-                    "2024-11-11T09:00:00+00:00",
-                    "SAVINGS_GOAL",
-                    "",
-                    None,
-                    "{}",
-                ),
-                (
-                    "item-main",
-                    "acc-1",
-                    "cat-1",
-                    "",
-                    "OUT",
-                    -3000,
-                    "GBP",
-                    "2024-11-10T12:00:00+00:00",
-                    "CARD",
-                    "Grocer",
-                    "SHOPPING",
-                    "{}",
-                ),
-            ],
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return db_path
+def _seed_transactions():
+    Category.objects.bulk_create(
+        [
+            Category(
+                account_uid="acc-1",
+                category_type="space",
+                category_uid="space-1",
+                space_uid="space-1",
+                name="Space One",
+            ),
+            Category(
+                account_uid="acc-1",
+                category_type="space",
+                category_uid="space-2",
+                space_uid="space-2",
+                name="Space Two",
+            ),
+            Category(
+                account_uid="acc-1",
+                category_type="spending",
+                category_uid="SHOPPING",
+                name="Shopping",
+            ),
+        ]
+    )
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid="item-space",
+                account_uid="acc-1",
+                category_uid="space-1",
+                space_uid="space-1",
+                direction="OUT",
+                amount_minor_units=-5000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 10, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Merchant",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="item-transfer",
+                account_uid="acc-1",
+                category_uid="space-1",
+                space_uid="space-1",
+                direction="OUT",
+                amount_minor_units=-2000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 11, 9, 0, tzinfo=timezone.utc),
+                source="SAVINGS_GOAL",
+                counterparty="",
+                spending_category=None,
+                classified_category=None,
+                classification_reason=None,
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="item-main",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Grocer",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+        ]
+    )
 
 
-def test_spending_page_renders(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_page_renders(settings):
     settings.STARLING_SUMMARY_DAYS = 30
+    _seed_transactions()
     client = Client()
     response = client.get(reverse("spaces:spending"))
     assert response.status_code == 200
@@ -97,18 +101,16 @@ def test_spending_page_renders(spend_db, settings):
     assert "Spending Overview" in markup
     assert "href=\"/\"" in markup
     assert "days=365" in markup
-
-
-def test_spending_page_respects_custom_days(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_page_respects_custom_days(settings):
+    _seed_transactions()
     client = Client()
     response = client.get(reverse("spaces:spending"), {"days": 180})
     assert response.status_code == 200
     assert "days=180" in response.content.decode()
 
 
-def test_spending_data_groups_by_spending_category(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_groups_by_spending_category(settings):
+    _seed_transactions()
     client = Client()
     response = client.get(
         reverse("spaces:spending-data"),
@@ -138,15 +140,14 @@ def test_spending_data_groups_by_spending_category(spend_db, settings):
     assert totals["Shopping"] == 8000
 
 
-def test_spending_data_rejects_invalid_days(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_rejects_invalid_days():
     client = Client()
     response = client.get(reverse("spaces:spending-data"), {"days": 0})
     assert response.status_code == 400
 
 
-def test_spending_data_defaults_to_settings_window(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_defaults_to_settings_window(settings):
+    _seed_transactions()
     settings.STARLING_SUMMARY_DAYS = 120
     client = Client()
     response = client.get(reverse("spaces:spending-data"))
@@ -156,15 +157,14 @@ def test_spending_data_defaults_to_settings_window(spend_db, settings):
     assert payload["days"] == 365
 
 
-def test_spending_data_rejects_invalid_reference(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_rejects_invalid_reference():
     client = Client()
     response = client.get(reverse("spaces:spending-data"), {"reference": "not-a-date"})
     assert response.status_code == 400
 
 
-def test_spending_data_handles_naive_reference(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_handles_naive_reference(settings):
+    _seed_transactions()
     client = Client()
     response = client.get(
         reverse("spaces:spending-data"),
@@ -176,21 +176,20 @@ def test_spending_data_handles_naive_reference(spend_db, settings):
     assert response.status_code == 200
 
 
-def test_spending_data_rejects_non_numeric_days(spend_db, settings):
-    settings.STARLING_FEEDS_DB = str(spend_db)
+def test_spending_data_rejects_non_numeric_days():
     client = Client()
     response = client.get(reverse("spaces:spending-data"), {"days": "many"})
     assert response.status_code == 400
 
 
-def test_calculate_spend_by_category_validates_args(spend_db):
+def test_calculate_spend_by_category_validates_args():
     with pytest.raises(ValueError):
-        calculate_spend_by_category(db_path=spend_db, days=0)
+        calculate_spend_by_category(days=0)
 
 
-def test_calculate_spend_normalises_reference(spend_db):
+def test_calculate_spend_normalises_reference():
+    _seed_transactions()
     summary = calculate_spend_by_category(
-        db_path=spend_db,
         days=10,
         reference_time=datetime(2024, 11, 15, 12, 0, 0),
     )

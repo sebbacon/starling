@@ -12,7 +12,18 @@
     <canvas id="spending-chart" height="320"></canvas>
   </section>
 
-  <section class="card" id="spending-legend"></section>
+  <section class="card">
+    <table id="spending-table" class="spending-table">
+      <thead>
+        <tr>
+          <th scope="col">Category</th>
+          <th scope="col">Monthly average</th>
+          <th scope="col">Total</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script>
@@ -28,23 +39,39 @@
       return response.json();
     }
 
-    function renderLegend(element, series, months) {
+    function renderTable(series, months) {
+      const table = document.getElementById('spending-table');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
       if (!series.length) {
-        element.innerHTML = '<p>No spend recorded for this window.</p>';
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 3;
+        cell.textContent = 'No spend recorded for this window.';
+        row.appendChild(cell);
+        tbody.appendChild(row);
         return;
       }
-      const items = series
-        .map((item, index) => {
-          const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
-          const total = formatter.format(item.totalMinorUnits / 100);
-          const average = formatter.format(item.averageMinorUnits / 100);
-          return `<div style="display:flex;align-items:center;margin-bottom:0.4rem;">
-            <span style="width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;margin-right:0.6rem;"></span>
-            <span><strong>${item.category}</strong><br /><small>${months} mo avg: ${average}</small><br />Total: ${total}</span>
-          </div>`;
-        })
-        .join('');
-      element.innerHTML = items;
+
+      series.forEach((item, index) => {
+        const row = document.createElement('tr');
+        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
+
+        const nameCell = document.createElement('td');
+        nameCell.innerHTML = `<span style="display:inline-flex;align-items:center;gap:0.6rem;"><span style=\"width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;\"></span><strong>${item.category}</strong></span>`;
+        row.appendChild(nameCell);
+
+        const averageCell = document.createElement('td');
+        averageCell.textContent = formatter.format(item.averageMinorUnits / 100);
+        row.appendChild(averageCell);
+
+        const totalCell = document.createElement('td');
+        totalCell.textContent = formatter.format(item.totalMinorUnits / 100);
+        row.appendChild(totalCell);
+
+        tbody.appendChild(row);
+      });
     }
 
     async function renderChart() {
@@ -93,7 +120,7 @@
         }
       });
 
-      renderLegend(document.getElementById('spending-legend'), data.series, data.months);
+      renderTable(data.series, data.months);
     }
 
     document.addEventListener('DOMContentLoaded', renderChart);

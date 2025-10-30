@@ -12,6 +12,9 @@ test:
 dev *args:
     UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py runserver {{args}}
 
+migrate *args:
+    UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py migrate
+
 report *args:
     PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py report_spaces {{args}}
 

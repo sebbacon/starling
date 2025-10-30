@@ -1,21 +1,31 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
+from django.db import transaction
+from django.db.models import Count, F, Q, Sum
+from django.db.models.functions import TruncMonth, Upper
 
-from .reporting import (API_BASE_URL, RETRYABLE_STATUS_CODES, AccountReport,
-                        Space, StarlingSchemaError, _parse_money,
-                        _request_json, fetch_spaces_configuration)
+from starling_web.spaces.models import Category, FeedItem, SyncState
 
-DEFAULT_DB_PATH = Path("data/starling_feeds.db")
+from .classification import classify_for_storage
+from .reporting import (
+    API_BASE_URL,
+    RETRYABLE_STATUS_CODES,
+    AccountReport,
+    Space,
+    StarlingSchemaError,
+    _parse_money,
+    _request_json,
+    fetch_spaces_configuration,
+)
+
 DEFAULT_CHANGES_SINCE = "2018-01-01T00:00:00Z"
 ASSUMED_CURRENCY = "GBP"
+EXCLUDED_TRANSFER_SOURCES = {"SAVINGS_GOAL", "INTERNAL_TRANSFER"}
 
 
 @dataclass(frozen=True)
@@ -37,149 +47,126 @@ class FeedRecord:
 def sync_space_feeds(
     token: str,
     *,
-    db_path: Path | str = DEFAULT_DB_PATH,
     base_url: str = API_BASE_URL,
     timeout: float = 10.0,
     changes_since: Optional[str] = None,
     max_pages: Optional[int] = None,
 ) -> None:
-    database = Path(db_path)
-    database.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(database) as conn:
-        conn.row_factory = sqlite3.Row
-        _ensure_schema(conn)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        }
-        with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
-            reports = fetch_spaces_configuration(token, base_url=base_url, timeout=timeout)
-            for report in reports:
-                _sync_account_spaces(
-                    conn,
-                    client,
-                    report,
-                    changes_since=changes_since,
-                    max_pages=max_pages,
-                )
-        conn.commit()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
+        reports = fetch_spaces_configuration(token, base_url=base_url, timeout=timeout)
+        for report in reports:
+            _sync_account_spaces(
+                client,
+                report,
+                changes_since=changes_since,
+                max_pages=max_pages,
+            )
 
 
 def calculate_average_spend(
     *,
-    db_path: Path | str = DEFAULT_DB_PATH,
     days: int = 30,
     reference_time: Optional[datetime] = None,
     account_balances: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if days <= 0:
         raise ValueError("days must be positive")
-    database = Path(db_path)
+
     reference = reference_time or datetime.now(timezone.utc)
     if reference.tzinfo is None:
         reference = reference.replace(tzinfo=timezone.utc)
     start = reference - timedelta(days=days)
-    with sqlite3.connect(database) as conn:
-        conn.row_factory = sqlite3.Row
-        conn.row_factory = sqlite3.Row
-        space_rows = conn.execute(
-            """
-            SELECT
-                c.account_uid,
-                c.category_uid AS space_uid,
-                c.name,
-                COALESCE(
-                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN -fi.amount_minor_units ELSE 0 END),
-                    0
-                ) AS total_outflow_minor,
-                COALESCE(
-                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN 1 ELSE 0 END),
-                    0
-                ) AS outflow_count
-            FROM categories c
-            LEFT JOIN feed_items fi
-              ON fi.account_uid = c.account_uid
-             AND fi.space_uid = c.category_uid
-             AND fi.transaction_time >= ?
-             AND fi.transaction_time < ?
-            WHERE c.category_type = 'space'
-            GROUP BY c.account_uid, c.category_uid, c.name
-            ORDER BY c.account_uid, c.category_uid
-            """,
-            (start.isoformat(), reference.isoformat()),
-        ).fetchall()
 
-        category_rows = conn.execute(
-            """
-            SELECT
-                c.account_uid,
-                c.category_uid,
-                c.name,
-                c.category_type,
-                COALESCE(
-                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN -fi.amount_minor_units ELSE 0 END),
-                    0
-                ) AS total_outflow_minor,
-                COALESCE(
-                    SUM(CASE WHEN fi.amount_minor_units < 0 THEN 1 ELSE 0 END),
-                    0
-                ) AS outflow_count
-            FROM categories c
-            LEFT JOIN feed_items fi
-              ON fi.account_uid = c.account_uid
-             AND fi.spending_category = c.category_uid
-             AND fi.transaction_time >= ?
-             AND fi.transaction_time < ?
-            WHERE c.category_type = 'spending'
-            GROUP BY c.account_uid, c.category_uid, c.name, c.category_type
-            ORDER BY c.account_uid, c.category_uid
-            """,
-            (start.isoformat(), reference.isoformat()),
-        ).fetchall()
+    space_names = {
+        (cat.account_uid, cat.category_uid): cat.name
+        for cat in Category.objects.filter(category_type="space")
+    }
+
+    spending_names = {
+        (cat.account_uid, cat.category_uid): cat.name
+        for cat in Category.objects.filter(category_type="spending")
+    }
+
+    space_totals = {
+        (row["account_uid"], row["space_uid"]): {
+            "total": int(row["total_outflow_minor"] or 0),
+            "count": int(row["outflow_count"] or 0),
+        }
+        for row in (
+            FeedItem.objects.filter(
+                transaction_time__gte=start,
+                transaction_time__lt=reference,
+                amount_minor_units__lt=0,
+            )
+            .values("account_uid", "space_uid")
+            .annotate(
+                total_outflow_minor=Sum(-F("amount_minor_units")),
+                outflow_count=Count("feed_item_uid"),
+            )
+        )
+    }
 
     spaces: List[Dict[str, Any]] = []
-    for row in space_rows:
-        total_outflow = int(row["total_outflow_minor"])
+    for (account_uid, category_uid), name in space_names.items():
+        stats = space_totals.get((account_uid, category_uid), {"total": 0, "count": 0})
+        total_outflow = stats["total"]
         avg_minor = _average_minor_units(total_outflow, days)
         spaces.append(
             {
-                "accountUid": row["account_uid"],
-                "spaceUid": row["space_uid"],
-                "spaceName": row["name"],
+                "accountUid": account_uid,
+                "spaceUid": category_uid,
+                "spaceName": name,
                 "currency": ASSUMED_CURRENCY,
                 "days": days,
                 "totalOutflowMinorUnits": total_outflow,
-                "totalOutflowFormatted": _format_minor_units(
-                    ASSUMED_CURRENCY, total_outflow
-                ),
+                "totalOutflowFormatted": _format_minor_units(ASSUMED_CURRENCY, total_outflow),
                 "averageDailySpendMinorUnits": avg_minor,
-                "averageDailySpendFormatted": _format_minor_units(
-                    ASSUMED_CURRENCY, avg_minor
-                ),
-                "outflowCount": int(row["outflow_count"]),
+                "averageDailySpendFormatted": _format_minor_units(ASSUMED_CURRENCY, avg_minor),
+                "outflowCount": stats["count"],
             }
         )
 
+    category_totals = {
+        (row["account_uid"], row["spending_category"]): {
+            "total": int(row["total_outflow_minor"] or 0),
+            "count": int(row["outflow_count"] or 0),
+        }
+        for row in (
+            FeedItem.objects.filter(
+                transaction_time__gte=start,
+                transaction_time__lt=reference,
+                amount_minor_units__lt=0,
+                spending_category__isnull=False,
+            )
+            .values("account_uid", "spending_category")
+            .annotate(
+                total_outflow_minor=Sum(-F("amount_minor_units")),
+                outflow_count=Count("feed_item_uid"),
+            )
+        )
+    }
+
     spending_categories: List[Dict[str, Any]] = []
-    for row in category_rows:
-        total_outflow = int(row["total_outflow_minor"])
+    for (account_uid, category_uid), name in spending_names.items():
+        stats = category_totals.get((account_uid, category_uid), {"total": 0, "count": 0})
+        total_outflow = stats["total"]
         avg_minor = _average_minor_units(total_outflow, days)
         spending_categories.append(
             {
-                "accountUid": row["account_uid"],
-                "category": row["category_uid"],
-                "name": row["name"],
+                "accountUid": account_uid,
+                "category": category_uid,
+                "name": name,
                 "currency": ASSUMED_CURRENCY,
                 "days": days,
                 "totalOutflowMinorUnits": total_outflow,
-                "totalOutflowFormatted": _format_minor_units(
-                    ASSUMED_CURRENCY, total_outflow
-                ),
+                "totalOutflowFormatted": _format_minor_units(ASSUMED_CURRENCY, total_outflow),
                 "averageDailySpendMinorUnits": avg_minor,
-                "averageDailySpendFormatted": _format_minor_units(
-                    ASSUMED_CURRENCY, avg_minor
-                ),
-                "outflowCount": int(row["outflow_count"]),
+                "averageDailySpendFormatted": _format_minor_units(ASSUMED_CURRENCY, avg_minor),
+                "outflowCount": stats["count"],
             }
         )
 
@@ -257,7 +244,6 @@ def fetch_account_balances(
 
 
 def _sync_account_spaces(
-    conn: sqlite3.Connection,
     client: httpx.Client,
     report: AccountReport,
     *,
@@ -267,7 +253,6 @@ def _sync_account_spaces(
     for space in report.spaces:
         category_uid = _space_category_uid(space)
         _upsert_category(
-            conn,
             account_uid=report.account_uid,
             category_uid=category_uid,
             category_type="space",
@@ -275,7 +260,6 @@ def _sync_account_spaces(
             space_uid=space.uid,
         )
         _sync_space_feed(
-            conn,
             client,
             report,
             space,
@@ -302,39 +286,22 @@ def _space_category_uid(space: Space) -> str:
 
 
 def _upsert_category(
-    conn: sqlite3.Connection,
+    *,
     account_uid: str,
     category_uid: str,
-    *,
     category_type: str,
     name: Optional[str],
     space_uid: Optional[str] = None,
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO categories (
-            account_uid,
-            category_type,
-            category_uid,
-            space_uid,
-            name
-        ) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(account_uid, category_type, category_uid) DO UPDATE SET
-            space_uid = excluded.space_uid,
-            name = excluded.name
-        """,
-        (
-            account_uid,
-            category_type,
-            category_uid,
-            space_uid,
-            name,
-        ),
+    Category.objects.update_or_create(
+        account_uid=account_uid,
+        category_type=category_type,
+        category_uid=category_uid,
+        defaults={"space_uid": space_uid, "name": name},
     )
 
 
 def _sync_space_feed(
-    conn: sqlite3.Connection,
     client: httpx.Client,
     report: AccountReport,
     space: Space,
@@ -343,7 +310,7 @@ def _sync_space_feed(
     changes_since: Optional[str],
     max_pages: Optional[int],
 ) -> None:
-    latest = _current_sync_cursor(conn, report.account_uid, category_uid)
+    latest = _current_sync_cursor(report.account_uid, category_uid)
     cursor = changes_since or latest or DEFAULT_CHANGES_SINCE
     url = f"/api/v2/feed/account/{report.account_uid}/category/{category_uid}"
     params: Optional[Dict[str, Any]] = {"changesSince": cursor}
@@ -362,25 +329,26 @@ def _sync_space_feed(
             retry_statuses=RETRYABLE_STATUS_CODES,
         )
         feed_items = data.get("feedItems") or []
-        for raw_item in feed_items:
-            record = _parse_feed_record(
-                raw_item,
-                account_uid=report.account_uid,
-                category_uid=category_uid,
-                space_uid=space.uid,
-                currency_hint=report.currency,
-            )
-            _insert_feed_record(conn, record)
-            if record.spending_category:
-                _upsert_category(
-                    conn,
+        with transaction.atomic():
+            for raw_item in feed_items:
+                record = _parse_feed_record(
+                    raw_item,
                     account_uid=report.account_uid,
-                    category_uid=record.spending_category,
-                    category_type="spending",
-                    name=_title_case_category(record.spending_category),
+                    category_uid=category_uid,
+                    space_uid=space.uid,
+                    currency_hint=report.currency,
                 )
-            if newest_timestamp is None or record.transaction_time > newest_timestamp:
-                newest_timestamp = record.transaction_time
+                classification = classify_for_storage(record, space.name)
+                _insert_feed_record(record, classification)
+                if record.spending_category:
+                    _upsert_category(
+                        account_uid=report.account_uid,
+                        category_uid=record.spending_category,
+                        category_type="spending",
+                        name=_title_case_category(record.spending_category),
+                    )
+                if newest_timestamp is None or record.transaction_time > newest_timestamp:
+                    newest_timestamp = record.transaction_time
 
         pageable = data.get("pageable") or {}
         next_url = pageable.get("next")
@@ -392,7 +360,6 @@ def _sync_space_feed(
 
     if newest_timestamp:
         _update_sync_state(
-            conn,
             report.account_uid,
             category_uid,
             cursor_time=newest_timestamp.isoformat(),
@@ -480,138 +447,45 @@ def _extract_feed_timestamp(raw: Dict[str, Any]) -> datetime:
     return timestamp
 
 
-def _insert_feed_record(conn: sqlite3.Connection, record: FeedRecord) -> None:
-    conn.execute(
-        """
-        INSERT INTO feed_items (
-            feed_item_uid,
-            account_uid,
-            category_uid,
-            space_uid,
-            direction,
-            amount_minor_units,
-            currency,
-            transaction_time,
-            source,
-            counterparty,
-            spending_category,
-            raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(feed_item_uid) DO NOTHING
-        """,
-        (
-            record.feed_item_uid,
-            record.account_uid,
-            record.category_uid,
-            record.space_uid,
-            record.direction,
-            record.amount_minor_units,
-            record.currency,
-            record.transaction_time.isoformat(),
-            record.source,
-            record.counterparty,
-            record.spending_category,
-            json.dumps(record.raw, sort_keys=True),
-        ),
+def _insert_feed_record(record: FeedRecord, classification) -> None:
+    FeedItem.objects.update_or_create(
+        feed_item_uid=record.feed_item_uid,
+        defaults={
+            "account_uid": record.account_uid,
+            "category_uid": record.category_uid,
+            "space_uid": record.space_uid,
+            "direction": record.direction,
+            "amount_minor_units": record.amount_minor_units,
+            "currency": record.currency,
+            "transaction_time": record.transaction_time,
+            "source": record.source,
+            "counterparty": record.counterparty,
+            "spending_category": record.spending_category,
+            "classified_category": classification.category,
+            "classification_reason": classification.reason,
+            "raw_json": record.raw,
+        },
     )
 
 
-def _current_sync_cursor(
-    conn: sqlite3.Connection,
-    account_uid: str,
-    category_uid: str,
-) -> Optional[str]:
-    row = conn.execute(
-        "SELECT last_transaction_time FROM sync_state WHERE account_uid = ? AND category_uid = ?",
-        (account_uid, category_uid),
-    ).fetchone()
-    if row:
-        return row[0]
-    return None
+def _current_sync_cursor(account_uid: str, category_uid: str) -> Optional[str]:
+    try:
+        state = SyncState.objects.get(account_uid=account_uid, category_uid=category_uid)
+    except SyncState.DoesNotExist:
+        return None
+    return state.last_transaction_time
 
 
-def _update_sync_state(
-    conn: sqlite3.Connection,
-    account_uid: str,
-    category_uid: str,
-    *,
-    cursor_time: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO sync_state (account_uid, category_uid, last_transaction_time)
-        VALUES (?, ?, ?)
-        ON CONFLICT(account_uid, category_uid) DO UPDATE SET
-            last_transaction_time = excluded.last_transaction_time
-        """,
-        (account_uid, category_uid, cursor_time),
+def _update_sync_state(account_uid: str, category_uid: str, *, cursor_time: str) -> None:
+    SyncState.objects.update_or_create(
+        account_uid=account_uid,
+        category_uid=category_uid,
+        defaults={"last_transaction_time": cursor_time},
     )
-
-
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS feed_items (
-            feed_item_uid TEXT PRIMARY KEY,
-            account_uid TEXT NOT NULL,
-            category_uid TEXT NOT NULL,
-            space_uid TEXT NOT NULL,
-            direction TEXT,
-            amount_minor_units INTEGER NOT NULL,
-            currency TEXT NOT NULL,
-            transaction_time TEXT NOT NULL,
-            source TEXT,
-            counterparty TEXT,
-            spending_category TEXT,
-            raw_json TEXT NOT NULL
-        )
-        """
-    )
-    _ensure_column(
-        conn,
-        "feed_items",
-        "spending_category",
-        "ALTER TABLE feed_items ADD COLUMN spending_category TEXT",
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS categories (
-            account_uid TEXT NOT NULL,
-            category_type TEXT NOT NULL,
-            category_uid TEXT NOT NULL,
-            space_uid TEXT,
-            name TEXT,
-            PRIMARY KEY (account_uid, category_type, category_uid)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_feed_items_account_space_time
-            ON feed_items (account_uid, space_uid, transaction_time)
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sync_state (
-            account_uid TEXT NOT NULL,
-            category_uid TEXT NOT NULL,
-            last_transaction_time TEXT,
-            PRIMARY KEY (account_uid, category_uid)
-        )
-        """
-    )
-
-
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
-    existing = {
-        row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-    }
-    if column not in existing:
-        conn.execute(ddl)
 
 
 def _title_case_category(value: str) -> str:
     if not value:
         return value
     return value.replace("_", " ").title()
+

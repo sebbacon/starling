@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 
+import pytest
 import respx
 
 from starling_spaces.ingestion import calculate_average_spend, sync_space_feeds
+from starling_web.spaces.models import Category, FeedItem, SyncState
 
+pytestmark = pytest.mark.django_db
 
 @respx.mock
-def test_sync_space_feeds_persists_feed_items(tmp_path, respx_mock):
+def test_sync_space_feeds_persists_feed_items(respx_mock):
     respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
         json={
             "accounts": [
@@ -117,58 +119,54 @@ def test_sync_space_feeds_persists_feed_items(tmp_path, respx_mock):
         }
     )
 
-    db_path = tmp_path / "starling.db"
-    sync_space_feeds(
-        "TOKEN",
-        db_path=db_path,
+    sync_space_feeds("TOKEN")
+
+    rows = list(
+        FeedItem.objects.order_by("feed_item_uid").values(
+            "feed_item_uid",
+            "amount_minor_units",
+            "transaction_time",
+            "spending_category",
+            "classified_category",
+            "classification_reason",
+        )
     )
+    assert [row["feed_item_uid"] for row in rows] == [
+        "feed-1",
+        "feed-2",
+        "feed-3",
+        "feed-4",
+    ]
+    assert rows[0]["amount_minor_units"] == -2000
+    assert rows[2]["amount_minor_units"] == 500
+    assert rows[0]["spending_category"] == "SHOPPING"
+    assert rows[3]["spending_category"] == "ENTERTAINMENT"
+    assert rows[0]["classified_category"] == "Shopping"
+    assert rows[0]["classification_reason"] == "starling_fallback"
 
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT feed_item_uid, amount_minor_units, transaction_time, spending_category FROM feed_items ORDER BY feed_item_uid"
-        ).fetchall()
-        assert [row["feed_item_uid"] for row in rows] == [
-            "feed-1",
-            "feed-2",
-            "feed-3",
-            "feed-4",
-        ]
-        assert rows[0]["amount_minor_units"] == -2000
-        assert rows[2]["amount_minor_units"] == 500
-        assert rows[0]["spending_category"] == "SHOPPING"
-        assert rows[3]["spending_category"] == "ENTERTAINMENT"
+    sync_state = SyncState.objects.get(account_uid="acc-123", category_uid="space-1")
+    assert sync_state.last_transaction_time == "2024-11-10T10:00:00+00:00"
 
-        sync_state = conn.execute(
-            "SELECT last_transaction_time FROM sync_state WHERE account_uid = ? AND category_uid = ?",
-            ("acc-123", "space-1"),
-        ).fetchone()
-        assert sync_state is not None
-        assert sync_state[0] == "2024-11-10T10:00:00+00:00"
-
-        categories = conn.execute(
-            "SELECT category_type, category_uid, space_uid, name FROM categories ORDER BY category_type, category_uid"
-        ).fetchall()
-        assert [
-            (row["category_type"], row["category_uid"])
-            for row in categories
-        ] == [
-            ("space", "space-1"),
-            ("space", "space-2"),
-            ("spending", "ENTERTAINMENT"),
-            ("spending", "GROCERIES"),
-            ("spending", "SAVING"),
-            ("spending", "SHOPPING"),
-        ]
-        first_space = categories[0]
-        assert first_space["space_uid"] == "space-1"
-        assert first_space["name"] == "Rainy Day"
-    finally:
-        conn.close()
+    categories = list(
+        Category.objects.order_by("category_type", "category_uid").values(
+            "category_type", "category_uid", "space_uid", "name"
+        )
+    )
+    assert [
+        (row["category_type"], row["category_uid"]) for row in categories
+    ] == [
+        ("space", "space-1"),
+        ("space", "space-2"),
+        ("spending", "ENTERTAINMENT"),
+        ("spending", "GROCERIES"),
+        ("spending", "SAVING"),
+        ("spending", "SHOPPING"),
+    ]
+    first_space = categories[0]
+    assert first_space["space_uid"] == "space-1"
+    assert first_space["name"] == "Rainy Day"
 
     summary = calculate_average_spend(
-        db_path=db_path,
         days=30,
         reference_time=datetime(2024, 11, 15, 0, 0, tzinfo=timezone.utc),
     )

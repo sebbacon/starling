@@ -9,7 +9,6 @@ pytestmark = pytest.mark.django_db
 
 
 def test_homepage_displays_summary(sample_feed_database, settings):
-    settings.STARLING_FEEDS_DB = str(sample_feed_database)
     settings.STARLING_SUMMARY_DAYS = 5
 
     client = Client()
@@ -24,7 +23,6 @@ def test_homepage_displays_summary(sample_feed_database, settings):
 
 
 def test_summary_partial_returns_fragment(sample_feed_database, settings):
-    settings.STARLING_FEEDS_DB = str(sample_feed_database)
 
     client = Client()
     response = client.get(
@@ -38,7 +36,6 @@ def test_summary_partial_returns_fragment(sample_feed_database, settings):
 
 
 def test_summary_partial_json_option(sample_feed_database, settings):
-    settings.STARLING_FEEDS_DB = str(sample_feed_database)
 
     client = Client()
     response = client.get(

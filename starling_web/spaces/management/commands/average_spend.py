@@ -1,7 +1,6 @@
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -13,11 +12,6 @@ class Command(BaseCommand):
     help = "Calculate the average spend for spaces and spending categories."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--db",
-            default=str(settings.STARLING_FEEDS_DB),
-            help="SQLite database containing feed data.",
-        )
         parser.add_argument(
             "--days",
             type=int,
@@ -41,12 +35,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        db_path = Path(options["db"]).expanduser()
-        if not db_path.is_absolute():
-            db_path = db_path.resolve()
-
         summary = ingestion.calculate_average_spend(
-            db_path=db_path,
             days=options["days"],
             reference_time=self._parse_reference_time(options.get("reference_time")),
         )

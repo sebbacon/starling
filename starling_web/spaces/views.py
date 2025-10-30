@@ -10,10 +10,7 @@ from starling_spaces.ingestion import calculate_average_spend
 
 
 def _build_summary():
-    return calculate_average_spend(
-        db_path=settings.STARLING_FEEDS_DB,
-        days=settings.STARLING_SUMMARY_DAYS,
-    )
+    return calculate_average_spend(days=settings.STARLING_SUMMARY_DAYS)
 
 
 @require_GET
@@ -63,11 +60,7 @@ def spending_data(request):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    summary = calculate_spend_by_category(
-        db_path=settings.STARLING_FEEDS_DB,
-        days=days,
-        reference_time=reference,
-    )
+    summary = calculate_spend_by_category(days=days, reference_time=reference)
     return JsonResponse(summary)
 
 

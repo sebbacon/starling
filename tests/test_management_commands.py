@@ -1,19 +1,23 @@
 import json
+from datetime import datetime, timezone
 
 import pytest
 from django.core.management import CommandError, call_command
+
+from starling_spaces import reporting
+from starling_web.spaces.models import Category, FeedItem, SyncState
 
 
 def test_ingest_feeds_requires_token(monkeypatch):
     monkeypatch.delenv("STARLING_PAT", raising=False)
 
     with pytest.raises(CommandError) as excinfo:
-        call_command("ingest_feeds", db="ignored.sqlite3")
+        call_command("ingest_feeds")
 
     assert "STARLING_PAT" in str(excinfo.value)
 
 
-def test_ingest_feeds_invokes_sync(monkeypatch, tmp_path):
+def test_ingest_feeds_invokes_sync(monkeypatch):
     invocations = []
 
     def fake_sync(token, **kwargs):
@@ -22,14 +26,17 @@ def test_ingest_feeds_invokes_sync(monkeypatch, tmp_path):
     monkeypatch.setenv("STARLING_PAT", "secret")
     monkeypatch.setattr("starling_spaces.ingestion.sync_space_feeds", fake_sync)
 
-    monkeypatch.chdir(tmp_path)
-
-    call_command("ingest_feeds", db="target.sqlite3")
+    call_command("ingest_feeds", max_pages=5)
 
     assert invocations
     token, kwargs = invocations[0]
     assert token == "secret"
-    assert kwargs["db_path"] == tmp_path / "target.sqlite3"
+    assert kwargs == {
+        "base_url": reporting.API_BASE_URL,
+        "timeout": 10.0,
+        "changes_since": None,
+        "max_pages": 5,
+    }
 
 
 def test_average_spend_outputs_summary(monkeypatch, sample_feed_database, capsys):
@@ -37,7 +44,6 @@ def test_average_spend_outputs_summary(monkeypatch, sample_feed_database, capsys
 
     call_command(
         "average_spend",
-        db=str(sample_feed_database),
         reference_time="2024-11-15T00:00:00+00:00",
     )
 
@@ -81,7 +87,7 @@ def test_ingest_feeds_surfaces_schema_errors(monkeypatch):
     )
 
     with pytest.raises(CommandError) as excinfo:
-        call_command("ingest_feeds", db="/tmp/example.sqlite3")
+        call_command("ingest_feeds")
 
     assert "broken" in str(excinfo.value)
 
@@ -154,21 +160,6 @@ def test_average_spend_rejects_invalid_reference_time(monkeypatch):
         call_command("average_spend", reference_time="not-a-timestamp")
 
 
-def test_average_spend_resolves_relative_db_path(monkeypatch, tmp_path):
-    captured_paths = {}
-
-    def fake_calculate(**kwargs):
-        captured_paths["db_path"] = kwargs["db_path"]
-        return {"spaces": [], "spendingCategories": []}
-
-    monkeypatch.setattr("starling_spaces.ingestion.calculate_average_spend", fake_calculate)
-    monkeypatch.chdir(tmp_path)
-
-    call_command("average_spend", db="feeds.sqlite3")
-
-    assert captured_paths["db_path"] == tmp_path / "feeds.sqlite3"
-
-
 def test_average_spend_parses_reference_time_variants():
     from starling_web.spaces.management.commands.average_spend import Command
 
@@ -178,6 +169,56 @@ def test_average_spend_parses_reference_time_variants():
 
     naive_time = command._parse_reference_time("2024-01-02T03:04:05")
     assert str(naive_time.tzinfo) == "UTC"
+
+
+@pytest.mark.django_db
+def test_reclassify_transactions_updates(tmp_path, monkeypatch):
+    Category.objects.create(
+        account_uid="acc-1",
+        category_type="space",
+        category_uid="space-1",
+        space_uid="space-1",
+        name="Mortgage Space",
+    )
+    FeedItem.objects.create(
+        feed_item_uid="tx-1",
+        account_uid="acc-1",
+        category_uid="space-1",
+        space_uid="space-1",
+        direction="OUT",
+        amount_minor_units=-10000,
+        currency="GBP",
+        transaction_time=datetime(2024, 11, 10, 10, 0, tzinfo=timezone.utc),
+        source="CARD",
+        counterparty="Mortgage Lender",
+        spending_category="SAVING",
+        classified_category="Saving",
+        classification_reason="starling_fallback",
+        raw_json={},
+    )
+
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """
+rules:
+  - type: counterparty_regex
+    pattern: "(?i)mortgage"
+    category: "Mortgage"
+    reason: "counterparty"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("STARLING_CLASSIFICATION_RULES", str(rules_path))
+
+    from starling_spaces import classification
+
+    classification.reset_rules_cache()
+
+    call_command("reclassify_transactions")
+
+    item = FeedItem.objects.get(feed_item_uid="tx-1")
+    assert item.classified_category == "Mortgage"
+    assert item.classification_reason == "counterparty"
 
 
 def test_report_spaces_filters_accounts(monkeypatch, capsys):
@@ -238,3 +279,4 @@ def test_report_spaces_wraps_errors(monkeypatch):
         call_command("report_spaces")
 
     assert "boom" in str(excinfo.value)
+

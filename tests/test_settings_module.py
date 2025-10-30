@@ -18,15 +18,22 @@ def _load_settings_with_env(env):
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("PYTHON_DOTENV_DISABLE", "1")
         patch.setattr(dotenv, "load_dotenv", lambda *_, **__: False)
-        for key, default in {
+        defaults = {
             "DJANGO_SECRET_KEY": "secret",
             "DJANGO_DEBUG": "1",
             "DJANGO_ALLOWED_HOSTS": "localhost",
             "DJANGO_DATABASE_PATH": "test.sqlite3",
-            "STARLING_FEEDS_DB": "data/starling_feeds.db",
             "STARLING_SUMMARY_DAYS": "30",
-        }.items():
+        }
+        for key, default in defaults.items():
             value = env.get(key, default)
+            if value is None:
+                patch.delenv(key, raising=False)
+            else:
+                patch.setenv(key, value)
+        for key, value in env.items():
+            if key in defaults:
+                continue
             if value is None:
                 patch.delenv(key, raising=False)
             else:
@@ -63,3 +70,4 @@ def test_settings_require_allowed_hosts_when_debug_off():
 def test_settings_validate_summary_days():
     with pytest.raises(ImproperlyConfigured):
         _load_settings_with_env({"STARLING_SUMMARY_DAYS": "0"})
+
