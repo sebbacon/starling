@@ -182,6 +182,41 @@ def test_spending_data_rejects_non_numeric_days():
     assert response.status_code == 400
 
 
+def test_spending_transactions_returns_matching_rows(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "category": "Shopping",
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["category"] == "Shopping"
+    ids = [item["feedItemUid"] for item in payload["transactions"]]
+    assert ids == ["item-main", "item-space"]
+    assert payload["transactions"][0]["amountMinorUnits"] == 3000
+    assert payload["transactions"][1]["amountMinorUnits"] == 5000
+
+
+def test_spending_transactions_requires_category():
+    client = Client()
+    response = client.get(reverse("spaces:spending-transactions"))
+    assert response.status_code == 400
+
+
+def test_spending_transactions_rejects_invalid_days():
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {"category": "Shopping", "days": 0},
+    )
+    assert response.status_code == 400
+
+
 def test_calculate_spend_by_category_validates_args():
     with pytest.raises(ValueError):
         calculate_spend_by_category(days=0)

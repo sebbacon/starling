@@ -1,12 +1,17 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
+from django.db.models.functions import Upper
 
-from starling_spaces.analytics import calculate_spend_by_category
+from starling_spaces.analytics import (
+    calculate_spend_by_category,
+    EXCLUDED_TRANSFER_SOURCES,
+)
 from starling_spaces.ingestion import calculate_average_spend
+from starling_web.spaces.models import Category, FeedItem
 
 
 def _build_summary():
@@ -62,6 +67,77 @@ def spending_data(request):
 
     summary = calculate_spend_by_category(days=days, reference_time=reference)
     return JsonResponse(summary)
+
+
+@require_GET
+def spending_transactions(request):
+    category = request.GET.get("category")
+    if not category:
+        return JsonResponse({"error": "category is required"}, status=400)
+
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        days = _parse_positive_int(request.GET.get("days"), default_days)
+        reference = _parse_reference_time(request.GET.get("reference"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    reference_time = reference or datetime.now(timezone.utc)
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=timezone.utc)
+    else:
+        reference_time = reference_time.astimezone(timezone.utc)
+
+    window_start = reference_time - timedelta(days=days)
+    window_end = reference_time + timedelta(seconds=1)
+
+    queryset = (
+        FeedItem.objects.filter(
+            transaction_time__gte=window_start,
+            transaction_time__lt=window_end,
+            amount_minor_units__lt=0,
+        )
+        .annotate(source_upper=Upper("source"))
+        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+        .order_by("-transaction_time")
+    )
+
+    if category == "Uncategorised":
+        queryset = queryset.filter(classified_category__isnull=True)
+    else:
+        queryset = queryset.filter(classified_category=category)
+
+    space_names = {
+        (cat.account_uid, cat.category_uid): cat.name
+        for cat in Category.objects.filter(category_type="space")
+    }
+
+    transactions = []
+    for item in queryset:
+        space_name = space_names.get((item.account_uid, item.space_uid))
+        transactions.append(
+            {
+                "feedItemUid": item.feed_item_uid,
+                "transactionTime": item.transaction_time.isoformat(),
+                "counterparty": item.counterparty or "",
+                "amountMinorUnits": int(-item.amount_minor_units),
+                "currency": item.currency or "GBP",
+                "spaceUid": item.space_uid or "",
+                "spaceName": space_name or "",
+                "source": item.source or "",
+                "classificationReason": item.classification_reason or "",
+            }
+        )
+
+    return JsonResponse(
+        {
+            "category": category,
+            "reference": reference_time.isoformat(),
+            "days": days,
+            "count": len(transactions),
+            "transactions": transactions,
+        }
+    )
 
 
 def _wants_json(request):

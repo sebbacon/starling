@@ -8,6 +8,50 @@
     <p>Stacked view of actual spend grouped by category over the last {{ summary_days }} days.</p>
   </header>
 
+  <style>
+    .spending-table tbody tr.active {
+      background: #eef4ff;
+    }
+    #transactions-card[hidden] {
+      display: none;
+    }
+    .transactions-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .transactions-header button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #2f3c52;
+      background: transparent;
+      color: #2f3c52;
+      cursor: pointer;
+    }
+    .transactions-header button:hover {
+      background: #2f3c52;
+      color: #fff;
+    }
+    #transaction-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #transaction-table th,
+    #transaction-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid #e1e6ef;
+      text-align: left;
+    }
+    #transaction-table td.numeric {
+      text-align: right;
+    }
+    #transaction-table tbody tr:hover {
+      background: #f5f8ff;
+    }
+  </style>
+
   <section class="card">
     <canvas id="spending-chart" height="320"></canvas>
   </section>
@@ -25,11 +69,35 @@
     </table>
   </section>
 
+  <section class="card" id="transactions-card" hidden>
+    <div class="transactions-header">
+      <h2 id="transactions-title">Transactions</h2>
+      <button type="button" id="reset-selection">Show all categories</button>
+    </div>
+    <table id="transaction-table">
+      <thead>
+        <tr>
+          <th scope="col">Date</th>
+          <th scope="col">Counterparty</th>
+          <th scope="col">Space</th>
+          <th scope="col">Source</th>
+          <th scope="col" class="numeric">Amount</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script>
     const palette = [
       '#35b779', '#31688e', '#fde725', '#440154', '#f8961e', '#577590', '#43aa8b', '#f9c74f', '#90be6d', '#f3722c'
     ];
+    const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
+    const summaryDaysDefault = {{ summary_days }};
+    let spendingSummary = null;
+    let chartInstance = null;
+    let activeCategory = null;
 
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
@@ -39,7 +107,7 @@
       return response.json();
     }
 
-    function renderTable(series, months) {
+    function renderTable(series, selectedCategory) {
       const table = document.getElementById('spending-table');
       const tbody = table.querySelector('tbody');
       tbody.innerHTML = '';
@@ -56,10 +124,15 @@
 
       series.forEach((item, index) => {
         const row = document.createElement('tr');
+        row.dataset.category = item.category;
+        if (selectedCategory && item.category === selectedCategory) {
+          row.classList.add('active');
+        }
+
         const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
 
         const nameCell = document.createElement('td');
-        nameCell.innerHTML = `<span style="display:inline-flex;align-items:center;gap:0.6rem;"><span style=\"width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;\"></span><strong>${item.category}</strong></span>`;
+        nameCell.innerHTML = `<span style="display:inline-flex;align-items:center;gap:0.6rem;"><span style="width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;"></span><strong>${item.category}</strong></span>`;
         row.appendChild(nameCell);
 
         const averageCell = document.createElement('td');
@@ -74,10 +147,152 @@
       });
     }
 
+    function renderTransactions(category, transactions) {
+      const card = document.getElementById('transactions-card');
+      const title = document.getElementById('transactions-title');
+      const tbody = document.querySelector('#transaction-table tbody');
+
+      title.textContent = transactions.length
+        ? `Transactions: ${category}`
+        : `No transactions for ${category}`;
+
+      tbody.innerHTML = '';
+
+      if (!transactions.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 5;
+        cell.textContent = 'No transactions recorded for this category in the selected window.';
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      } else {
+        transactions.forEach((txn) => {
+          const row = document.createElement('tr');
+
+          const dateCell = document.createElement('td');
+          dateCell.textContent = new Date(txn.transactionTime).toLocaleString('en-GB', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+          });
+          row.appendChild(dateCell);
+
+          const counterpartyCell = document.createElement('td');
+          counterpartyCell.textContent = txn.counterparty || '—';
+          row.appendChild(counterpartyCell);
+
+          const spaceCell = document.createElement('td');
+          spaceCell.textContent = txn.spaceName || txn.spaceUid || '—';
+          row.appendChild(spaceCell);
+
+          const sourceCell = document.createElement('td');
+          sourceCell.textContent = txn.source || '—';
+          row.appendChild(sourceCell);
+
+          const amountCell = document.createElement('td');
+          amountCell.classList.add('numeric');
+          const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
+          amountCell.textContent = formatter.format(txn.amountMinorUnits / 100);
+          row.appendChild(amountCell);
+
+          tbody.appendChild(row);
+        });
+      }
+
+      card.hidden = false;
+    }
+
+    function showTransactionsLoading(category) {
+      const card = document.getElementById('transactions-card');
+      const title = document.getElementById('transactions-title');
+      const tbody = document.querySelector('#transaction-table tbody');
+      title.textContent = `Transactions: ${category}`;
+      tbody.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
+      card.hidden = false;
+    }
+
+    function clearTransactions() {
+      const card = document.getElementById('transactions-card');
+      const tbody = document.querySelector('#transaction-table tbody');
+      tbody.innerHTML = '';
+      card.hidden = true;
+    }
+
+    async function loadTransactions(category) {
+      if (!spendingSummary) {
+        return;
+      }
+      showTransactionsLoading(category);
+      const params = new URLSearchParams({
+        category,
+        days: spendingSummary.days ?? summaryDaysDefault,
+        reference: spendingSummary.reference,
+      });
+      try {
+        const response = await fetch(`${transactionsEndpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch transactions');
+        }
+        const payload = await response.json();
+        renderTransactions(category, payload.transactions || []);
+      } catch (error) {
+        const tbody = document.querySelector('#transaction-table tbody');
+        tbody.innerHTML = '<tr><td colspan="5">Unable to load transactions. Please try again.</td></tr>';
+      }
+    }
+
+    function resetSelection() {
+      activeCategory = null;
+      if (chartInstance) {
+        chartInstance.data.datasets.forEach((dataset) => {
+          dataset.hidden = false;
+        });
+        chartInstance.update();
+      }
+      clearTransactions();
+      if (spendingSummary) {
+        renderTable(spendingSummary.series, activeCategory);
+      }
+    }
+
+    function handleChartClick(event) {
+      if (!chartInstance) {
+        return;
+      }
+      const points = chartInstance.getElementsAtEventForMode(
+        event,
+        'nearest',
+        { intersect: true },
+        false
+      );
+      if (!points.length) {
+        return;
+      }
+      const [{ datasetIndex }] = points;
+      const dataset = chartInstance.data.datasets[datasetIndex];
+      if (!dataset) {
+        return;
+      }
+      const selectedLabel = dataset.label;
+
+      if (activeCategory === selectedLabel) {
+        resetSelection();
+        return;
+      }
+
+      activeCategory = selectedLabel;
+
+      chartInstance.data.datasets.forEach((ds, index) => {
+        ds.hidden = index !== datasetIndex;
+      });
+      chartInstance.update();
+      renderTable(spendingSummary.series, activeCategory);
+      void loadTransactions(selectedLabel);
+    }
+
     async function renderChart() {
-      const data = await loadSpendingData();
+      spendingSummary = await loadSpendingData();
       const ctx = document.getElementById('spending-chart').getContext('2d');
-      const datasets = data.series.map((item, index) => ({
+      const datasets = spendingSummary.series.map((item, index) => ({
         label: item.category,
         data: item.values,
         backgroundColor: palette[index % palette.length],
@@ -85,10 +300,10 @@
         currency: item.currency || 'GBP'
       }));
 
-      new Chart(ctx, {
+      chartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: data.dates,
+          labels: spendingSummary.dates,
           datasets
         },
         options: {
@@ -120,7 +335,10 @@
         }
       });
 
-      renderTable(data.series, data.months);
+      document.getElementById('spending-chart').addEventListener('click', handleChartClick);
+      document.getElementById('reset-selection').addEventListener('click', resetSelection);
+      clearTransactions();
+      renderTable(spendingSummary.series, activeCategory);
     }
 
     document.addEventListener('DOMContentLoaded', renderChart);
