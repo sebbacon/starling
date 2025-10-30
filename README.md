@@ -1,17 +1,12 @@
-# Starling Spaces Reporter
+# Starling Spaces Dashboard
 
-A small CLI that prints the current configuration and balances for the Spaces attached to your Starling Bank accounts.
+A lightweight Django project that renders a live snapshot of Starling Spaces activity using SQLite as the backing store. The repository also provides management commands for ingesting feed data and emitting JSON reports, replacing the previous CLI scripts.
 
 ## Prerequisites
 
-- Python 3.12 (a `.venv` is created via `uv venv`)
+- Python 3.12 (create the virtualenv with `uv venv`)
 - [`uv`](https://github.com/astral-sh/uv) for dependency management
-- A Starling personal access token (PAT) stored as `STARLING_PAT` inside a local `.env` file in this directory
-
-```ini
-# .env
-STARLING_PAT=replace-with-your-token
-```
+- Configuration provided through environment variables. Copy `.env.sample` to `.env` and adjust the values, especially `STARLING_PAT` (your Starling personal access token).
 
 ## Installing dependencies
 
@@ -19,44 +14,51 @@ STARLING_PAT=replace-with-your-token
 uv sync
 ```
 
-The repo already includes helper tasks via `just`:
+## Helper tasks
 
+Common tasks are defined in the `justfile`:
+
+- `just dev -- 0.0.0.0:8000` – run the Django development server
+- `just ingest -- --db data/starling_feeds.db` – sync feed data into SQLite
+- `just report` – emit the Spaces configuration as JSON
+- `just average-spend -- --db data/starling_feeds.db` – compute spend averages per space and spending category
 - `just test` – run the pytest suite
-- `just clean` – auto-format with Ruff and isort
-- `just ingest -- --db data/starling_feeds.db` – pull feed history (including spending categories) for every space into `data/starling_feeds.db`
-- `just average-spend -- --db data/starling_feeds.db` – compute spend averages for each space *and* spending category, and report the latest account balances (supports `--days` and `--reference-time`)
+- `just coverage` – run the test suite with coverage reporting
+- `just clean` – auto-format the Python sources with Ruff and isort
 
 ## Usage
 
-Run the CLI with `uv` so dependencies are resolved automatically:
+### Web dashboard
 
 ```bash
-uv run python -m starling_spaces.cli
+just dev -- 0.0.0.0:8000
 ```
 
-Optional flags:
+Visit `http://localhost:8000/` to view the summary. The homepage uses htmx to refresh the metrics without a full page reload.
 
-- `--account ACCOUNT_UID` – restrict output to one or more account UIDs (you can repeat the flag)
-- `--base-url URL` – override the Starling API base URL (defaults to `https://api.starlingbank.com`)
-- `--timeout SECONDS` – adjust the HTTP timeout (default `10`)
+### Management commands
 
-Example output (field values are illustrative):
+```bash
+# ingest feed data
+just ingest -- --db data/starling_feeds.db
 
-```
-Account Personal (acc-123) — GBP
-  Space Rainy Day (space-1)
-    Balance: GBP 1,200.00
-    Target: GBP 2,000.00
-    State: ACTIVE
-    Settings:
-      roundUpMultiplier: 2
-      sweepEnabled: True
+# emit the Spaces configuration as JSON
+just report
+
+# calculate average spend (defaults to STARLING_SUMMARY_DAYS)
+just average-spend
 ```
 
-If the PAT is invalid or missing, the command exits with a non-zero status and prints a helpful error message to stderr.
+If `STARLING_PAT` is missing, the commands fail fast with a clear error so secrets issues surface immediately.
 
 ## Tests
 
 ```bash
 just test
+```
+
+For coverage details run:
+
+```bash
+just coverage
 ```

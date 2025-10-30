@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Starling Spaces{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-css-reset/dist/reset.min.css" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background-color: #101215;
+        color: #f8f9fb;
+        margin: 0;
+        padding: 1.5rem;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      header {
+        margin-bottom: 1.5rem;
+      }
+      .card {
+        background-color: #1a1d21;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      @media (min-width: 768px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      h1, h2 {
+        margin: 0 0 0.75rem;
+      }
+      dl {
+        margin: 0;
+      }
+      dt {
+        font-weight: 600;
+      }
+      dd {
+        margin: 0 0 0.5rem;
+      }
+      button.refresh {
+        background: #34d399;
+        color: #101215;
+        border: none;
+        border-radius: 999px;
+        padding: 0.4rem 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.refresh:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
