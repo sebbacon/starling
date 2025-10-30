@@ -41,17 +41,24 @@ def summary(request):
 
 @require_GET
 def spending(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        days = _parse_positive_int(request.GET.get("days"), default_days)
+    except ValueError:
+        days = default_days
+
     return render(
         request,
         "spaces/spending.html",
-        {"summary_days": settings.STARLING_SUMMARY_DAYS},
+        {"summary_days": days},
     )
 
 
 @require_GET
 def spending_data(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
-        days = _parse_positive_int(request.GET.get("days"), settings.STARLING_SUMMARY_DAYS)
+        days = _parse_positive_int(request.GET.get("days"), default_days)
         reference = _parse_reference_time(request.GET.get("reference"))
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)

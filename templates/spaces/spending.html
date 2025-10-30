@@ -28,7 +28,7 @@
       return response.json();
     }
 
-    function renderLegend(element, series) {
+    function renderLegend(element, series, months) {
       if (!series.length) {
         element.innerHTML = '<p>No spend recorded for this window.</p>';
         return;
@@ -37,9 +37,10 @@
         .map((item, index) => {
           const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: item.currency || 'GBP' });
           const total = formatter.format(item.totalMinorUnits / 100);
+          const average = formatter.format(item.averageMinorUnits / 100);
           return `<div style="display:flex;align-items:center;margin-bottom:0.4rem;">
             <span style="width:14px;height:14px;border-radius:4px;background:${palette[index % palette.length]};display:inline-block;margin-right:0.6rem;"></span>
-            <span><strong>${item.category}</strong> &mdash; ${total}</span>
+            <span><strong>${item.category}</strong><br /><small>${months} mo avg: ${average}</small><br />Total: ${total}</span>
           </div>`;
         })
         .join('');
@@ -92,7 +93,7 @@
         }
       });
 
-      renderLegend(document.getElementById('spending-legend'), data.series);
+      renderLegend(document.getElementById('spending-legend'), data.series, data.months);
     }
 
     document.addEventListener('DOMContentLoaded', renderChart);

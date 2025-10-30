@@ -31,8 +31,8 @@ def calculate_spend_by_category(
         rows = conn.execute(
             """
             SELECT
-                DATE(fi.transaction_time) AS spend_day,
-                COALESCE(space.name, spend.name, 'Uncategorised') AS category_name,
+                SUBSTR(fi.transaction_time, 1, 7) AS spend_month,
+                COALESCE(spend.name, space.name, 'Uncategorised') AS category_name,
                 fi.currency AS currency,
                 SUM(-fi.amount_minor_units) AS total_minor
             FROM feed_items fi
@@ -47,12 +47,9 @@ def calculate_spend_by_category(
             WHERE fi.amount_minor_units < 0
               AND fi.transaction_time >= ?
               AND fi.transaction_time < ?
-              AND NOT (
-                  fi.spending_category IS NULL
-                  AND UPPER(COALESCE(fi.source, '')) IN (?, ?)
-              )
-            GROUP BY spend_day, category_name, fi.currency
-            ORDER BY spend_day ASC, category_name ASC
+              AND UPPER(COALESCE(fi.source, '')) NOT IN (?, ?)
+            GROUP BY spend_month, category_name, fi.currency
+            ORDER BY spend_month ASC, category_name ASC
             """,
             (
                 window_start.isoformat(),
@@ -61,7 +58,8 @@ def calculate_spend_by_category(
             ),
         ).fetchall()
 
-    dates = sorted({row["spend_day"] for row in rows})
+    months = sorted({row["spend_month"] for row in rows})
+    dates = [f"{month}-01" for month in months]
     categories = sorted({row["category_name"] for row in rows})
 
     values = {
@@ -74,7 +72,7 @@ def calculate_spend_by_category(
 
     for row in rows:
         category = row["category_name"]
-        day = row["spend_day"]
+        day = f"{row['spend_month']}-01"
         idx = dates.index(day)
         values[category]["minor"][idx] = int(row["total_minor"])
         values[category]["currency"] = row["currency"] or values[category]["currency"]
@@ -83,6 +81,10 @@ def calculate_spend_by_category(
     for category in categories:
         minor_values = values[category]["minor"]
         major_values = [round(amount / 100, 2) for amount in minor_values]
+        non_zero_months = [value for value in minor_values if value > 0]
+        month_count = len(minor_values) if minor_values else 0
+        avg_minor = int(sum(minor_values) / month_count) if month_count else 0
+        avg_major = round(avg_minor / 100, 2)
         series.append(
             {
                 "category": category,
@@ -90,6 +92,8 @@ def calculate_spend_by_category(
                 "minorValues": minor_values,
                 "totalMinorUnits": sum(minor_values),
                 "currency": values[category]["currency"] or "GBP",
+                "averageMinorUnits": avg_minor,
+                "average": avg_major,
             }
         )
 
@@ -98,4 +102,5 @@ def calculate_spend_by_category(
         "series": series,
         "reference": reference.isoformat(),
         "days": days,
+        "months": len(dates),
     }

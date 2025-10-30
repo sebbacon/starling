@@ -89,14 +89,25 @@ def spend_db(tmp_path):
 
 def test_spending_page_renders(spend_db, settings):
     settings.STARLING_FEEDS_DB = str(spend_db)
+    settings.STARLING_SUMMARY_DAYS = 30
     client = Client()
     response = client.get(reverse("spaces:spending"))
     assert response.status_code == 200
-    assert "Spending Overview" in response.content.decode()
-    assert "href=\"/\"" in response.content.decode()
+    markup = response.content.decode()
+    assert "Spending Overview" in markup
+    assert "href=\"/\"" in markup
+    assert "days=365" in markup
 
 
-def test_spending_data_prefers_space_category(spend_db, settings):
+def test_spending_page_respects_custom_days(spend_db, settings):
+    settings.STARLING_FEEDS_DB = str(spend_db)
+    client = Client()
+    response = client.get(reverse("spaces:spending"), {"days": 180})
+    assert response.status_code == 200
+    assert "days=180" in response.content.decode()
+
+
+def test_spending_data_groups_by_spending_category(spend_db, settings):
     settings.STARLING_FEEDS_DB = str(spend_db)
     client = Client()
     response = client.get(
@@ -108,23 +119,23 @@ def test_spending_data_prefers_space_category(spend_db, settings):
     )
     assert response.status_code == 200
     payload = json.loads(response.content.decode())
-    assert payload["dates"] == ["2024-11-10"]
+    assert payload["dates"] == ["2024-11-01"]
 
-    space_series = next(item for item in payload["series"] if item["category"] == "Space One")
-    shopping_series = next(item for item in payload["series"] if item["category"] == "Shopping")
+    assert payload["dates"] == ["2024-11-01"]
 
-    assert space_series["values"] == [50.0]
-    assert space_series["minorValues"] == [5000]
+    assert payload["months"] == 1
 
-    assert shopping_series["values"] == [30.0]
-    assert shopping_series["minorValues"] == [3000]
+    assert len(payload["series"]) == 1
+    shopping_series = payload["series"][0]
+    assert shopping_series["category"] == "Shopping"
+    assert shopping_series["minorValues"] == [8000]
+    assert shopping_series["values"] == [80.0]
+    assert shopping_series["averageMinorUnits"] == 8000
+    assert shopping_series["average"] == 80.0
 
-    categories = {item["category"] for item in payload["series"]}
-    assert "Space Two" not in categories
-
-    # ensure transfer excluded
+    # ensure internal transfer excluded entirely
     totals = {item["category"]: item["totalMinorUnits"] for item in payload["series"]}
-    assert totals["Space One"] == 5000
+    assert totals["Shopping"] == 8000
 
 
 def test_spending_data_rejects_invalid_days(spend_db, settings):
@@ -136,12 +147,13 @@ def test_spending_data_rejects_invalid_days(spend_db, settings):
 
 def test_spending_data_defaults_to_settings_window(spend_db, settings):
     settings.STARLING_FEEDS_DB = str(spend_db)
-    settings.STARLING_SUMMARY_DAYS = 1500
+    settings.STARLING_SUMMARY_DAYS = 120
     client = Client()
     response = client.get(reverse("spaces:spending-data"))
     assert response.status_code == 200
     payload = json.loads(response.content.decode())
     assert payload["series"]
+    assert payload["days"] == 365
 
 
 def test_spending_data_rejects_invalid_reference(spend_db, settings):
