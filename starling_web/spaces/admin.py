@@ -21,7 +21,7 @@ class FeedItemAdmin(admin.ModelAdmin):
         "amount_minor_units",
         "transaction_time",
     )
-    list_filter = ("currency", "classification_reason", "source")
+    list_filter = ("currency", "counterparty", "classified_category", "classification_reason", "source")
     search_fields = ("feed_item_uid", "counterparty", "classified_category")
     ordering = ("-transaction_time",)
 
