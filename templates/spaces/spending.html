@@ -414,7 +414,17 @@
       popover.style.overflow = 'auto';
 
       const rawPre = document.createElement('pre');
-      rawPre.textContent = JSON.stringify(txn.raw || {}, null, 2);
+      const payload = {
+        feedItemUid: txn.feedItemUid,
+        category: txn.category,
+        spaceUid: txn.spaceUid,
+        spaceName: txn.spaceName || null,
+        source: txn.source,
+        counterparty: txn.counterparty,
+        classificationReason: txn.classificationReason || null,
+        raw: txn.raw || {},
+      };
+      rawPre.textContent = JSON.stringify(payload, null, 2);
       rawPre.style.whiteSpace = 'pre-wrap';
       rawPre.style.wordBreak = 'break-word';
       rawPre.style.margin = '0';
