@@ -11,3 +11,9 @@ test:
 
 report *args:
     PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python -m starling_spaces.cli {{args}}
+
+ingest *args:
+    PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python -m starling_spaces.cli ingest-feeds {{args}}
+
+average-spend *args:
+    PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python -m starling_spaces.cli average-spend {{args}}

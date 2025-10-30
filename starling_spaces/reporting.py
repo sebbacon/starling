@@ -547,13 +547,14 @@ def _request_json(
     method: str,
     url: str,
     *,
+    params: Optional[Dict[str, Any]] = None,
     max_attempts: int = 1,
     retry_statuses: Tuple[int, ...] = (),
 ) -> Dict[str, Any]:
     attempt = 0
     while True:
         try:
-            response = client.request(method, url)
+            response = client.request(method, url, params=params)
         except httpx.HTTPError as exc:
             raise StarlingAPIError(f"Network error: {exc}") from exc
 
