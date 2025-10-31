@@ -43,12 +43,15 @@ def summary(request):
 
 
 @require_GET
-def spending(request, category_name=None):
+def spending(request, category_name=None, counterparty_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
         days = _parse_positive_int(request.GET.get("days"), default_days)
     except ValueError:
         days = default_days
+
+    counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
+    counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
     return render(
         request,
@@ -56,7 +59,9 @@ def spending(request, category_name=None):
         {
             "summary_days": days,
             "initial_category": category_name or "",
+            "initial_counterparty": counterparty_name or "",
             "base_spending_url": reverse("spaces:spending"),
+            "counterparty_base_url": counterparty_base,
         },
     )
 
@@ -77,8 +82,9 @@ def spending_data(request):
 @require_GET
 def spending_transactions(request):
     category = request.GET.get("category")
-    if not category:
-        return JsonResponse({"error": "category is required"}, status=400)
+    counterparty = request.GET.get("counterparty")
+    if not category and not counterparty:
+        return JsonResponse({"error": "category or counterparty is required"}, status=400)
 
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -100,17 +106,21 @@ def spending_transactions(request):
         FeedItem.objects.filter(
             transaction_time__gte=window_start,
             transaction_time__lt=window_end,
-            amount_minor_units__lt=0,
         )
         .annotate(source_upper=Upper("source"))
         .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
         .order_by("-transaction_time")
     )
 
-    if category == "Uncategorised":
-        queryset = queryset.filter(classified_category__isnull=True)
-    else:
-        queryset = queryset.filter(classified_category=category)
+    if category:
+        queryset = queryset.filter(amount_minor_units__lt=0)
+        if category == "Uncategorised":
+            queryset = queryset.filter(classified_category__isnull=True)
+        else:
+            queryset = queryset.filter(classified_category=category)
+
+    if counterparty:
+        queryset = queryset.filter(counterparty=counterparty)
 
     space_names = {
         (cat.account_uid, cat.category_uid): cat.name
@@ -136,15 +146,17 @@ def spending_transactions(request):
             }
         )
 
-    return JsonResponse(
-        {
-            "category": category,
-            "reference": reference_time.isoformat(),
-            "days": days,
-            "count": len(transactions),
-            "transactions": transactions,
-        }
-    )
+    response = {
+        "reference": reference_time.isoformat(),
+        "days": days,
+        "count": len(transactions),
+        "transactions": transactions,
+    }
+    if category:
+        response["category"] = category
+    if counterparty:
+        response["counterparty"] = counterparty
+    return JsonResponse(response)
 
 
 def _wants_json(request):

@@ -102,6 +102,7 @@ def test_spending_page_renders(settings):
     assert "href=\"/\"" in markup
     assert "days=365" in markup
     assert response.context["initial_category"] == ""
+    assert response.context["initial_counterparty"] == ""
 
 
 def test_spending_page_respects_custom_days(settings):
@@ -118,6 +119,16 @@ def test_spending_page_prefills_from_category_path(settings):
     response = client.get(reverse("spaces:spending-category", args=["Dining"]))
     assert response.status_code == 200
     assert response.context["initial_category"] == "Dining"
+    assert response.context["initial_counterparty"] == ""
+
+
+def test_spending_page_prefills_counterparty_path(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(reverse("spaces:spending-counterparty", args=["Merchant"]))
+    assert response.status_code == 200
+    assert response.context["initial_counterparty"] == "Merchant"
+    assert response.context["initial_category"] == ""
 
 
 def test_spending_data_groups_by_spending_category(settings):
@@ -214,7 +225,23 @@ def test_spending_transactions_returns_matching_rows(settings):
     assert payload["transactions"][0]["category"] == "Shopping"
 
 
-def test_spending_transactions_requires_category():
+def test_spending_transactions_can_filter_counterparty(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "counterparty": "Merchant",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["counterparty"] == "Merchant"
+    assert payload["count"] == 1
+    assert payload["transactions"][0]["counterparty"] == "Merchant"
+
+
+def test_spending_transactions_requires_filter():
     client = Client()
     response = client.get(reverse("spaces:spending-transactions"))
     assert response.status_code == 400

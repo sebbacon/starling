@@ -81,19 +81,22 @@
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const summaryDaysDefault = {{ summary_days }};
     const initialCategory = "{{ initial_category|escapejs }}";
+    const initialCounterparty = "{{ initial_counterparty|escapejs }}";
     const baseSpendingUrl = "{{ base_spending_url|escapejs }}";
     const normalizedBasePath = baseSpendingUrl.endsWith('/') ? baseSpendingUrl : `${baseSpendingUrl}/`;
     const categoryPathBase = `${normalizedBasePath}category/`;
+    const counterpartyBaseUrl = "{{ counterparty_base_url|escapejs }}";
+    const counterpartyPathBase = counterpartyBaseUrl.endsWith('/') ? counterpartyBaseUrl : `${counterpartyBaseUrl}/`;
     let spendingSummary = null;
     let chartInstance = null;
-    let activeCategory = null;
-    let currentCategoryLabel = '';
+    let currentFilter = null;
     let currentTransactions = [];
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
+    let chartMode = 'category';
     const counterpartyColors = new Map();
     let counterpartyColorIndex = 0;
-
+    let selectedCategory = null;
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
       if (!response.ok) {
@@ -121,7 +124,7 @@
 
     function updateSortIndicators() {
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
-        if (!currentCategoryLabel || currentTransactionsMessage) {
+        if (!currentFilter || currentTransactionsMessage) {
           th.setAttribute('aria-sort', 'none');
           return;
         }
@@ -148,6 +151,7 @@
       if (!chartInstance || !spendingSummary) {
         return;
       }
+      chartMode = 'category';
       chartInstance.data.labels = [...spendingSummary.dates];
       chartInstance.data.datasets = buildDefaultDatasets(spendingSummary.series);
       chartInstance.update();
@@ -206,6 +210,7 @@
           };
         });
 
+      chartMode = 'counterparty';
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
       chartInstance.update();
@@ -216,14 +221,14 @@
       const title = document.getElementById('transactions-title');
       const tbody = document.querySelector('#transaction-table tbody');
 
-      if (!currentCategoryLabel) {
+      if (!currentFilter) {
         card.hidden = true;
         updateSortIndicators();
         return;
       }
 
       card.hidden = false;
-      title.textContent = `Transactions: ${currentCategoryLabel}`;
+      title.textContent = currentFilter.label ? `Transactions: ${currentFilter.label}` : 'Transactions';
 
       tbody.innerHTML = '';
 
@@ -242,7 +247,7 @@
         const row = document.createElement('tr');
         const cell = document.createElement('td');
         cell.colSpan = 6;
-        cell.textContent = 'No transactions recorded for this category in the selected window.';
+        cell.textContent = 'No transactions recorded for this selection in the chosen window.';
         row.appendChild(cell);
         tbody.appendChild(row);
         updateSortIndicators();
@@ -289,68 +294,83 @@
       updateSortIndicators();
     }
 
-    function showTransactionsLoading(category) {
-      currentCategoryLabel = category;
+    function showTransactionsLoading(filter) {
+      currentFilter = { ...filter, label: filter.label || filter.value };
       currentTransactions = [];
       currentTransactionsMessage = 'Loading…';
       sortState.column = 'transactionTime';
       sortState.direction = 'desc';
+      if (filter.type === 'category') {
+        selectedCategory = filter.value;
+      } else {
+        selectedCategory = null;
+      }
       renderTransactionsTable();
     }
 
     function clearTransactions() {
-      currentCategoryLabel = '';
+      currentFilter = null;
       currentTransactions = [];
       currentTransactionsMessage = null;
+      selectedCategory = null;
       renderTransactionsTable();
       applyDefaultDatasets();
     }
 
-    async function loadTransactions(category) {
+    async function loadTransactions(filter) {
       if (!spendingSummary) {
         return;
       }
-      showTransactionsLoading(category);
+      const prepared = { ...filter, label: filter.label || filter.value };
+      showTransactionsLoading(prepared);
+
       const params = new URLSearchParams({
-        category,
         days: spendingSummary.days ?? summaryDaysDefault,
         reference: spendingSummary.reference,
       });
+      if (prepared.type === 'category') {
+        params.set('category', prepared.value);
+      } else if (prepared.type === 'counterparty') {
+        params.set('counterparty', prepared.value);
+      }
+
       try {
         const response = await fetch(`${transactionsEndpoint}?${params.toString()}`);
         if (!response.ok) {
           throw new Error('Failed to fetch transactions');
         }
         const payload = await response.json();
-        currentCategoryLabel = category;
+        currentFilter = prepared;
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
         renderTransactionsTable();
-        applyCounterpartyDatasets(currentTransactions);
+        if (prepared.type === 'category') {
+          applyCounterpartyDatasets(currentTransactions);
+        } else {
+          applyDefaultDatasets();
+        }
       } catch (error) {
-        currentCategoryLabel = category;
+        currentFilter = prepared;
         currentTransactions = [];
         currentTransactionsMessage = 'Unable to load transactions. Please try again.';
         renderTransactionsTable();
-        applyDefaultDatasets();
+        if (prepared.type === 'category') {
+          applyCounterpartyDatasets([]);
+        } else {
+          applyDefaultDatasets();
+        }
       }
     }
 
     function resetSelection() {
-      activeCategory = null;
-      if (chartInstance) {
-        chartInstance.data.datasets.forEach((dataset) => {
-          dataset.hidden = false;
-        });
-        chartInstance.update();
-      }
+      selectedCategory = null;
       window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();
     }
 
     function handleSortClick(event) {
       const key = event.currentTarget.dataset.sortKey;
-      if (!key || !currentCategoryLabel || currentTransactionsMessage) {
+      if (!key || !currentFilter || currentTransactionsMessage) {
         return;
       }
 
@@ -384,32 +404,30 @@
       }
       const selectedLabel = dataset.label;
 
-      if (activeCategory === selectedLabel) {
+      if (chartMode === 'counterparty') {
+        window.location.href = `${counterpartyPathBase}${encodeURIComponent(selectedLabel)}/`;
+        return;
+      }
+
+      if (currentFilter && currentFilter.type === 'category' && currentFilter.value === selectedLabel) {
         resetSelection();
         return;
       }
 
-      activeCategory = selectedLabel;
+      const filter = { type: 'category', value: selectedLabel, label: selectedLabel };
       window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(selectedLabel)}/`);
-      void loadTransactions(selectedLabel);
+      void loadTransactions(filter);
     }
 
     async function renderChart() {
       spendingSummary = await loadSpendingData();
       const ctx = document.getElementById('spending-chart').getContext('2d');
-      const datasets = spendingSummary.series.map((item, index) => ({
-        label: item.category,
-        data: item.values,
-        backgroundColor: palette[index % palette.length],
-        stack: 'spend-stack',
-        currency: item.currency || 'GBP'
-      }));
 
       chartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: spendingSummary.dates,
-          datasets
+          labels: [],
+          datasets: [],
         },
         options: {
           responsive: true,
@@ -431,7 +449,9 @@
               stacked: true,
               ticks: {
                 callback: function(value) {
-                  const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: datasets[0]?.currency || 'GBP', maximumFractionDigits: 0 });
+                  const firstDataset = this.chart.data.datasets[0];
+                  const currency = firstDataset?.currency || 'GBP';
+                  const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 });
                   return formatter.format(value);
                 }
               }
@@ -447,14 +467,17 @@
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
         th.addEventListener('click', handleSortClick);
       });
-      if (initialCategory) {
-        const datasetIndex = chartInstance.data.datasets.findIndex((ds) => ds.label === initialCategory);
-        if (datasetIndex !== -1) {
-          activeCategory = initialCategory;
-          window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
-          void loadTransactions(initialCategory);
-          return;
-        }
+      if (initialCategory && spendingSummary.series.some((item) => item.category === initialCategory)) {
+        const filter = { type: 'category', value: initialCategory, label: initialCategory };
+        window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
+        void loadTransactions(filter);
+        return;
+      }
+      if (initialCounterparty) {
+        const filter = { type: 'counterparty', value: initialCounterparty, label: initialCounterparty };
+        window.history.replaceState({}, '', `${counterpartyPathBase}${encodeURIComponent(initialCounterparty)}/`);
+        void loadTransactions(filter);
+        return;
       }
       window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();
