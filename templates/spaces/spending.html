@@ -100,6 +100,15 @@
       min-height: 1.2rem;
       color: #9ca3af;
     }
+    .counterparty-rule {
+      margin-left: 0.4rem;
+      color: #6b7280;
+      text-decoration: none;
+      font-size: 0.85rem;
+    }
+    .counterparty-rule:hover {
+      color: #34d399;
+    }
     .overview-container {
       margin-top: 1.25rem;
       position: relative;
@@ -212,6 +221,7 @@
     const spendingDataEndpoint = "{% url 'spaces:spending-data' %}";
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const rulesPageBase = "{% url 'spaces:classification-rules' %}";
     const summaryDaysDefault = {{ summary_days }};
     const overviewDays = 1825;
     const initialCategory = "{{ initial_category|escapejs }}";
@@ -673,7 +683,24 @@
         row.appendChild(categoryCell);
 
         const counterpartyCell = document.createElement('td');
-        counterpartyCell.textContent = txn.counterparty || '—';
+        if (txn.counterparty) {
+          const textSpan = document.createElement('span');
+          textSpan.textContent = txn.counterparty;
+          counterpartyCell.appendChild(textSpan);
+          const ruleLink = document.createElement('a');
+          const params = new URLSearchParams({
+            pattern: txn.counterparty,
+            rule_type: 'counterparty_regex',
+          });
+          ruleLink.href = `${rulesPageBase}?${params.toString()}`;
+          ruleLink.classList.add('counterparty-rule');
+          ruleLink.setAttribute('title', 'Create classification rule for this counterparty');
+          ruleLink.setAttribute('aria-label', `Create rule for ${txn.counterparty}`);
+          ruleLink.textContent = '⚙️';
+          counterpartyCell.appendChild(ruleLink);
+        } else {
+          counterpartyCell.textContent = '—';
+        }
         row.appendChild(counterpartyCell);
 
         const spaceCell = document.createElement('td');

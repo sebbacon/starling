@@ -160,3 +160,15 @@ def test_json_path_lookup_returns_all_on_focus(sample_feed_item):
     assert response.status_code == 200
     payload = response.json()
     assert "merchant.name" in payload["results"]
+
+
+def test_manage_rules_prefills_from_query():
+    client = Client()
+    response = client.get(
+        reverse("spaces:classification-rules"),
+        {"pattern": "VetSuccess", "rule_type": "counterparty_regex"},
+    )
+    assert response.status_code == 200
+    form = response.context["form"]
+    assert form.initial.get("pattern") == "VetSuccess"
+    assert form.initial.get("rule_type") == "counterparty_regex"

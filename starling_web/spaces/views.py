@@ -334,6 +334,11 @@ def manage_classification_rules(request):
         initial = {}
         max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
         initial["position"] = max_position + 1
+        if request.GET.get("pattern"):
+            initial["pattern"] = request.GET.get("pattern")
+        pref_rule_type = request.GET.get("rule_type")
+        if pref_rule_type in dict(RULE_TYPE_CHOICES):
+            initial["rule_type"] = pref_rule_type
         form = ClassificationRuleForm(initial=initial, category_choices=category_options)
         if selected_rule:
             form = ClassificationRuleForm(instance=selected_rule, category_choices=category_options)
