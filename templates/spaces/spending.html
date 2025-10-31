@@ -91,6 +91,8 @@
     let currentTransactions = [];
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
+    const counterpartyColors = new Map();
+    let counterpartyColorIndex = 0;
 
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
@@ -189,13 +191,20 @@
 
       const datasets = Array.from(aggregates.entries())
         .sort((a, b) => b[1].total - a[1].total)
-        .map(([name, data], index) => ({
-          label: name,
-          data: labels.map((label) => (data.totals.get(label) || 0) / 100),
-          backgroundColor: palette[index % palette.length],
-          stack: 'counterparty-stack',
-          currency: data.currency,
-        }));
+        .map(([name, data]) => {
+          if (!counterpartyColors.has(name)) {
+            counterpartyColors.set(name, palette[counterpartyColorIndex % palette.length]);
+            counterpartyColorIndex += 1;
+          }
+          const color = counterpartyColors.get(name);
+          return {
+            label: name,
+            data: labels.map((label) => (data.totals.get(label) || 0) / 100),
+            backgroundColor: color,
+            stack: 'counterparty-stack',
+            currency: data.currency,
+          };
+        });
 
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
