@@ -316,6 +316,27 @@ def manage_classification_rules(request):
     return render(request, "spaces/classification_rules.html", context)
 
 
+@require_GET
+def space_lookup(request):
+    term = (request.GET.get("q") or "").strip()
+    if not term:
+        return JsonResponse({"results": []})
+
+    matches = (
+        Category.objects.filter(category_type="space", name__icontains=term)
+        .order_by("name")
+        .values("space_uid", "name")[:10]
+    )
+    results = [
+        {
+            "spaceUid": item["space_uid"],
+            "name": item["name"] or item["space_uid"],
+        }
+        for item in matches
+    ]
+    return JsonResponse({"results": results})
+
+
 def _parse_positive_int(value, default):
     if not value:
         return default

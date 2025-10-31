@@ -18,4 +18,5 @@ urlpatterns = [
     path("spending/transactions/", views.spending_transactions, name="spending-transactions"),
     path("spending/transactions/recategorise/", views.recategorise_transactions, name="spending-recategorise"),
     path("rules/", views.manage_classification_rules, name="classification-rules"),
+    path("rules/spaces/search/", views.space_lookup, name="space-lookup"),
 ]
