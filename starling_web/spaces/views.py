@@ -30,6 +30,32 @@ RULE_TYPE_CHOICES = [
 ]
 
 
+def _iter_json_paths(data, prefix=None, array_limit=5):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            next_prefix = f"{prefix}.{key}" if prefix else key
+            yield from _iter_json_paths(value, next_prefix, array_limit)
+    elif isinstance(data, list):
+        for index, value in enumerate(data[:array_limit]):
+            next_prefix = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            yield from _iter_json_paths(value, next_prefix, array_limit)
+    else:
+        if prefix:
+            yield prefix
+
+
+def collect_json_paths(limit=200):
+    seen = set()
+    collected = []
+    queryset = FeedItem.objects.exclude(raw_json={}).order_by("-transaction_time")[:limit]
+    for item in queryset:
+        for path in _iter_json_paths(item.raw_json):
+            if path not in seen:
+                seen.add(path)
+                collected.append(path)
+    return collected
+
+
 class ClassificationRuleForm(forms.ModelForm):
     rule_type = forms.ChoiceField(choices=RULE_TYPE_CHOICES, label="Rule type")
 
@@ -53,25 +79,72 @@ class ClassificationRuleForm(forms.ModelForm):
             "end_date": forms.DateInput(attrs={"type": "date"}),
         }
 
-    def __init__(self, *args, category_choices=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        category_choices=None,
+        space_choices=None,
+        json_path_choices=None,
+        **kwargs,
+    ):
         self.category_choices = category_choices or []
+        self.space_choices = space_choices or []
+        self.json_path_choices = json_path_choices or []
         super().__init__(*args, **kwargs)
-        choices = [("", "Select a category")]
+
+        category_list = [("", "Select a category")]
         for name in sorted(set(self.category_choices)):
-            choices.append((name, name))
-        current = None
+            category_list.append((name, name))
+        current_category = None
         if self.is_bound:
-            current = self.data.get("category")
+            current_category = self.data.get("category")
         else:
-            current = self.initial.get("category") or getattr(self.instance, "category", None)
-        if current and current not in [value for value, _ in choices]:
-            choices.append((current, current))
+            current_category = self.initial.get("category") or getattr(self.instance, "category", None)
+        if current_category and current_category not in {value for value, _ in category_list}:
+            category_list.append((current_category, current_category))
         self.fields["category"] = forms.ChoiceField(
-            choices=choices,
+            choices=category_list,
             required=False,
             label="Category",
         )
-        self.fields["category"].initial = current or ""
+        self.fields["category"].initial = current_category or ""
+
+        space_list = [("", "Any space")]
+        for value, label in self.space_choices:
+            display = label or value
+            space_list.append((value, display))
+        current_space = None
+        if self.is_bound:
+            current_space = self.data.get("space_uid")
+        else:
+            current_space = self.initial.get("space_uid") or getattr(self.instance, "space_uid", None)
+        if current_space and current_space not in {value for value, _ in space_list}:
+            space_list.append((current_space, current_space))
+        self.fields["space_uid"] = forms.ChoiceField(
+            choices=space_list,
+            required=False,
+            label="Space UID",
+        )
+        self.fields["space_uid"].initial = current_space or ""
+        self.fields["space_uid"].help_text = "Limit the rule to a particular Starling space."
+
+        path_list = [("", "Any JSON path")]
+        for path in self.json_path_choices:
+            path_list.append((path, path))
+        current_path = None
+        if self.is_bound:
+            current_path = self.data.get("json_path")
+        else:
+            current_path = self.initial.get("json_path") or getattr(self.instance, "json_path", None)
+        if current_path and current_path not in {value for value, _ in path_list}:
+            path_list.append((current_path, current_path))
+        self.fields["json_path"] = forms.ChoiceField(
+            choices=path_list,
+            required=False,
+            label="JSON path",
+        )
+        self.fields["json_path"].initial = current_path or ""
+        self.fields["json_path"].help_text = "Dot-separated path in the stored transaction payload."
 
     def clean(self):
         cleaned = super().clean()
@@ -90,6 +163,13 @@ class ClassificationRuleForm(forms.ModelForm):
             category = None
             cleaned["category"] = None
 
+        if space_uid == "":
+            space_uid = None
+            cleaned["space_uid"] = None
+        if json_path == "":
+            json_path = None
+            cleaned["json_path"] = None
+
         if rule_type in {"counterparty_regex", "space_name_regex", "source_regex"}:
             if not pattern:
                 self.add_error("pattern", "Provide a regular expression to match against.")
@@ -98,18 +178,17 @@ class ClassificationRuleForm(forms.ModelForm):
 
         if rule_type == "space":
             if not space_uid:
-                self.add_error("space_uid", "Provide the Starling space UID to match.")
+                self.add_error("space_uid", "Select the Starling space to match.")
             if not category:
                 self.add_error("category", "Select the category to apply when the space matches.")
 
         if rule_type == "raw_path":
             if not json_path:
-                self.add_error("json_path", "Provide the dot-separated JSON path to inspect.")
+                self.add_error("json_path", "Select the JSON path to inspect.")
             if not category:
                 self.add_error("category", "Select the category to apply when the JSON path has a value.")
 
         if rule_type == "starling_category" and category:
-            # allow explicit override but ensure not empty string
             cleaned["category"] = category.strip() or None
 
         return cleaned
@@ -129,14 +208,12 @@ def spending(request, category_name=None, counterparty_name=None):
         Category.objects.filter(category_type="spending")
         .exclude(name__isnull=True)
         .exclude(name="")
-        .order_by("name")
         .values_list("name", flat=True)
         .distinct()
     )
     category_options = list(category_options_query)
     if "Uncategorised" not in category_options:
         category_options.append("Uncategorised")
-
     counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
@@ -295,6 +372,18 @@ def manage_classification_rules(request):
     category_options = list(category_options_query)
     if "Uncategorised" not in category_options:
         category_options.append("Uncategorised")
+    space_options_query = (
+        Category.objects.filter(category_type="space")
+        .exclude(space_uid__isnull=True)
+        .exclude(space_uid="")
+        .values("space_uid", "name")
+        .distinct()
+    )
+    space_choices = []
+    for item in space_options_query:
+        label = item["name"] or item["space_uid"]
+        space_choices.append((item["space_uid"], label))
+    json_path_options = collect_json_paths()
     selected_rule = None
     selected_rule_id = request.GET.get("rule")
     if selected_rule_id:
@@ -321,7 +410,13 @@ def manage_classification_rules(request):
             instance = get_object_or_404(ClassificationRule, pk=rule_id)
             selected_rule = instance
 
-        form = ClassificationRuleForm(request.POST, instance=instance, category_choices=category_options)
+        form = ClassificationRuleForm(
+            request.POST,
+            instance=instance,
+            category_choices=category_options,
+            space_choices=space_choices,
+            json_path_choices=json_path_options,
+        )
         if form.is_valid():
             rule = form.save(commit=False)
             if rule.position is None:
@@ -339,9 +434,19 @@ def manage_classification_rules(request):
         pref_rule_type = request.GET.get("rule_type")
         if pref_rule_type in dict(RULE_TYPE_CHOICES):
             initial["rule_type"] = pref_rule_type
-        form = ClassificationRuleForm(initial=initial, category_choices=category_options)
+        form = ClassificationRuleForm(
+            initial=initial,
+            category_choices=category_options,
+            space_choices=space_choices,
+            json_path_choices=json_path_options,
+        )
         if selected_rule:
-            form = ClassificationRuleForm(instance=selected_rule, category_choices=category_options)
+            form = ClassificationRuleForm(
+                instance=selected_rule,
+                category_choices=category_options,
+                space_choices=space_choices,
+                json_path_choices=json_path_options,
+            )
 
     context = {
         "rules": rules,
@@ -352,64 +457,6 @@ def manage_classification_rules(request):
         "category_choices": sorted(set(category_options)),
     }
     return render(request, "spaces/classification_rules.html", context)
-
-
-@require_GET
-def space_lookup(request):
-    term = (request.GET.get("q") or "").strip()
-    if not term:
-        return JsonResponse({"results": []})
-
-    matches = (
-        Category.objects.filter(category_type="space", name__icontains=term)
-        .order_by("name")
-        .values("space_uid", "name")[:10]
-    )
-    results = [
-        {
-            "spaceUid": item["space_uid"],
-            "name": item["name"] or item["space_uid"],
-        }
-        for item in matches
-    ]
-    return JsonResponse({"results": results})
-
-
-@require_GET
-def json_path_lookup(request):
-    term = (request.GET.get("q") or "").strip()
-
-    collected = []
-    seen = set()
-
-    def iter_paths(data, prefix=None):
-        if isinstance(data, dict):
-            for key, value in data.items():
-                next_prefix = f"{prefix}.{key}" if prefix else key
-                yield from iter_paths(value, next_prefix)
-        elif isinstance(data, list):
-            for index, value in enumerate(data[:5]):
-                next_prefix = f"{prefix}[{index}]" if prefix else f"[{index}]"
-                yield from iter_paths(value, next_prefix)
-        else:
-            if prefix:
-                yield prefix
-
-    queryset = FeedItem.objects.exclude(raw_json={}).order_by("-transaction_time")[:200]
-    for item in queryset:
-        for path in iter_paths(item.raw_json):
-            if term:
-                if term.lower() not in path.lower():
-                    continue
-            if path not in seen:
-                seen.add(path)
-                collected.append(path)
-            if len(collected) >= 10:
-                break
-        if len(collected) >= 10:
-            break
-
-    return JsonResponse({"results": collected})
 
 
 def _parse_positive_int(value, default):

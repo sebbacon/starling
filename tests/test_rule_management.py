@@ -39,6 +39,12 @@ def seed_categories(db):
 
 @pytest.fixture
 def sample_feed_item(db):
+    Category.objects.get_or_create(
+        account_uid="acc-1",
+        category_type="space",
+        category_uid="space-1",
+        defaults={"space_uid": "space-1", "name": "Space One"},
+    )
     FeedItem.objects.create(
         feed_item_uid="json-1",
         account_uid="acc-1",
@@ -146,20 +152,15 @@ def test_manage_rules_deletes_rule():
     assert ClassificationRule.objects.count() == 0
 
 
-def test_json_path_lookup_returns_paths(sample_feed_item):
+def test_manage_rules_provides_space_and_path_choices(sample_feed_item):
     client = Client()
-    response = client.get(reverse("spaces:json-path-lookup"), {"q": "merchant"})
+    response = client.get(reverse("spaces:classification-rules"))
     assert response.status_code == 200
-    payload = response.json()
-    assert any(path.startswith("merchant.") for path in payload["results"])
-
-
-def test_json_path_lookup_returns_all_on_focus(sample_feed_item):
-    client = Client()
-    response = client.get(reverse("spaces:json-path-lookup"))
-    assert response.status_code == 200
-    payload = response.json()
-    assert "merchant.name" in payload["results"]
+    form = response.context["form"]
+    space_values = [value for value, _ in form.fields["space_uid"].choices]
+    json_values = [value for value, _ in form.fields["json_path"].choices]
+    assert "space-1" in space_values
+    assert "merchant.name" in json_values
 
 
 def test_manage_rules_prefills_from_query():
