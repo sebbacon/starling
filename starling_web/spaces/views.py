@@ -11,35 +11,7 @@ from starling_spaces.analytics import (
     calculate_spend_by_category,
     EXCLUDED_TRANSFER_SOURCES,
 )
-from starling_spaces.ingestion import calculate_average_spend
 from starling_web.spaces.models import Category, FeedItem
-
-
-def _build_summary():
-    return calculate_average_spend(days=settings.STARLING_SUMMARY_DAYS)
-
-
-@require_GET
-def home(request):
-    context = {
-        "summary": _build_summary(),
-        "summary_days": settings.STARLING_SUMMARY_DAYS,
-    }
-    return render(request, "spaces/home.html", context)
-
-
-@require_GET
-def summary(request):
-    summary_payload = _build_summary()
-
-    if _wants_json(request):
-        return JsonResponse(summary_payload)
-
-    return render(
-        request,
-        "spaces/_summary.html",
-        {"summary": summary_payload, "summary_days": settings.STARLING_SUMMARY_DAYS},
-    )
 
 
 @require_GET
@@ -157,11 +129,6 @@ def spending_transactions(request):
     if counterparty:
         response["counterparty"] = counterparty
     return JsonResponse(response)
-
-
-def _wants_json(request):
-    accept_header = request.META.get("HTTP_ACCEPT", "")
-    return "application/json" in accept_header
 
 
 def _parse_positive_int(value, default):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.urls import path
+from django.views.generic import RedirectView
 
 from . import views
 
@@ -9,8 +10,7 @@ app_name = "spaces"
 
 
 urlpatterns = [
-    path("", views.home, name="home"),
-    path("summary/", views.summary, name="summary"),
+    path("", RedirectView.as_view(pattern_name="spaces:spending", permanent=False), name="home"),
     path("spending/", views.spending, name="spending"),
     path("spending/category/<str:category_name>/", views.spending, name="spending-category"),
     path("spending/counterparty/<str:counterparty_name>/", views.spending, name="spending-counterparty"),
