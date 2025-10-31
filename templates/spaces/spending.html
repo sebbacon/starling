@@ -377,7 +377,7 @@
         currentTransactionsMessage = null;
         renderTransactionsTable();
         if (prepared.type === 'category') {
-          applyCounterpartyDatasets(currentTransactions);
+          applyStackedDatasets(currentFilter.type, currentTransactions);
         } else {
           applyDefaultDatasets();
         }
@@ -387,7 +387,7 @@
         currentTransactionsMessage = 'Unable to load transactions. Please try again.';
         renderTransactionsTable();
         if (prepared.type === 'category') {
-          applyCounterpartyDatasets([]);
+          applyStackedDatasets(currentFilter.type, []);
         } else {
           applyDefaultDatasets();
         }
