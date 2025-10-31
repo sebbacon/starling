@@ -100,7 +100,8 @@ def test_spending_page_renders(settings):
     markup = response.content.decode()
     assert "Spending Overview" in markup
     assert "href=\"/\"" in markup
-    assert "days=365" in markup
+    assert response.context["summary_days"] == 365
+    assert "overview-container" in markup
     assert response.context["initial_category"] == ""
     assert response.context["initial_counterparty"] == ""
 
@@ -110,7 +111,7 @@ def test_spending_page_respects_custom_days(settings):
     client = Client()
     response = client.get(reverse("spaces:spending"), {"days": 180})
     assert response.status_code == 200
-    assert "days=180" in response.content.decode()
+    assert response.context["summary_days"] == 180
 
 
 def test_spending_page_prefills_from_category_path(settings):
@@ -151,10 +152,8 @@ def test_spending_data_groups_by_spending_category(settings):
     )
     assert response.status_code == 200
     payload = json.loads(response.content.decode())
-    assert payload["dates"] == ["2024-11-01"]
-
-    assert payload["dates"] == ["2024-11-01"]
-
+    assert payload["bucket"] == "day"
+    assert payload["dates"] == ["2024-11-10"]
     assert payload["months"] == 1
 
     assert len(payload["series"]) == 1
@@ -204,6 +203,23 @@ def test_spending_data_handles_naive_reference(settings):
         },
     )
     assert response.status_code == 200
+
+
+def test_spending_data_accepts_date_range(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-data"),
+        {
+            "start": "2024-10-01T00:00:00Z",
+            "end": "2024-12-01T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["start"].startswith("2024-10-01")
+    assert payload["end"].startswith("2024-12-01")
+    assert payload["days"] >= 60
 
 
 def test_spending_data_rejects_non_numeric_days():
@@ -277,6 +293,24 @@ def test_spending_transactions_can_search_amount(settings):
     payload = json.loads(response.content.decode())
     ids = [txn["feedItemUid"] for txn in payload["transactions"]]
     assert ids == ["item-main"]
+
+
+def test_spending_transactions_accepts_date_range(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "category": "Shopping",
+            "start": "2024-11-01T00:00:00Z",
+            "end": "2024-12-01T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["count"] == 2
+    assert payload["start"].startswith("2024-11-01")
+    assert payload["end"].startswith("2024-12-01")
 
 
 def test_spending_transactions_requires_filter():

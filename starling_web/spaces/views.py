@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import math
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -20,7 +21,7 @@ from starling_web.spaces.models import Category, FeedItem
 def spending(request, category_name=None, counterparty_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
-        days = _parse_positive_int(request.GET.get("days"), default_days)
+        _, _, days, _ = _resolve_time_window(request, default_days)
     except ValueError:
         days = default_days
 
@@ -47,12 +48,15 @@ def spending(request, category_name=None, counterparty_name=None):
 def spending_data(request):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
-        days = _parse_positive_int(request.GET.get("days"), default_days)
-        reference = _parse_reference_time(request.GET.get("reference"))
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    summary = calculate_spend_by_category(days=days, reference_time=reference)
+    summary = calculate_spend_by_category(
+        days=days,
+        reference_time=reference,
+        start_time=window_start,
+    )
     return JsonResponse(summary)
 
 
@@ -67,19 +71,10 @@ def spending_transactions(request):
 
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
-        days = _parse_positive_int(request.GET.get("days"), default_days)
-        reference = _parse_reference_time(request.GET.get("reference"))
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-
     reference_time = reference or datetime.now(timezone.utc)
-    if reference_time.tzinfo is None:
-        reference_time = reference_time.replace(tzinfo=timezone.utc)
-    else:
-        reference_time = reference_time.astimezone(timezone.utc)
-
-    window_start = reference_time - timedelta(days=days)
-    window_end = reference_time + timedelta(seconds=1)
 
     queryset = (
         FeedItem.objects.filter(
@@ -135,6 +130,8 @@ def spending_transactions(request):
     response = {
         "reference": reference_time.isoformat(),
         "days": days,
+        "start": window_start.isoformat(),
+        "end": window_end.isoformat(),
         "count": len(transactions),
         "transactions": transactions,
     }
@@ -169,11 +166,7 @@ def _parse_reference_time(value):
         parsed = datetime.fromisoformat(cleaned)
     except ValueError as exc:
         raise ValueError(f"Invalid reference time: {value}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
-    return parsed
+    return _normalize_to_utc(parsed)
 
 
 def _parse_amount_minor_units(value):
@@ -195,3 +188,40 @@ def _parse_amount_minor_units(value):
         return None
     minor_units = int(abs(quantised * 100))
     return minor_units
+
+
+def _normalize_to_utc(dt):
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _resolve_time_window(request, default_days):
+    start_raw = request.GET.get("start")
+    end_raw = request.GET.get("end")
+
+    if start_raw or end_raw:
+        if not start_raw or not end_raw:
+            raise ValueError("start and end must be provided together")
+        start = _parse_reference_time(start_raw)
+        end = _parse_reference_time(end_raw)
+        if start is None or end is None:
+            raise ValueError("Invalid date range provided")
+        start = _normalize_to_utc(start)
+        end = _normalize_to_utc(end)
+        if end <= start:
+            raise ValueError("end must be after start")
+        seconds = (end - start).total_seconds()
+        days = max(1, math.ceil(seconds / 86400))
+        reference_time = end - timedelta(seconds=1)
+        return start, end, days, reference_time
+
+    days = _parse_positive_int(request.GET.get("days"), default_days)
+    reference = _parse_reference_time(request.GET.get("reference"))
+    if reference is None:
+        reference = datetime.now(timezone.utc)
+    else:
+        reference = _normalize_to_utc(reference)
+    start = reference - timedelta(days=days)
+    end = reference + timedelta(seconds=1)
+    return start, end, days, reference

@@ -47,10 +47,68 @@
     #transaction-table tbody tr:hover {
       background: #f5f8ff;
     }
+    .overview-container {
+      margin-top: 1.25rem;
+      position: relative;
+      height: 120px;
+    }
+    .overview-container canvas {
+      width: 100%;
+      height: 100%;
+    }
+    .brush-hitbox {
+      position: absolute;
+      inset: 0;
+      cursor: crosshair;
+    }
+    .brush-selection {
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      background: rgba(52, 211, 153, 0.2);
+      border: 1px solid #34d399;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: auto;
+      cursor: grab;
+    }
+    .brush-handle {
+      pointer-events: auto;
+      width: 12px;
+      margin: 0 -6px;
+      background: #34d399;
+      border-radius: 12px;
+      box-shadow: 0 0 6px rgba(16, 24, 39, 0.4);
+      cursor: ew-resize;
+      align-self: stretch;
+      opacity: 0.9;
+    }
+    .brush-handle::after {
+      content: '';
+      display: block;
+      width: 2px;
+      height: 60%;
+      margin: 20% auto;
+      background: rgba(16, 24, 39, 0.6);
+      border-radius: 2px;
+    }
+    .brush-selection.dragging {
+      background: rgba(52, 211, 153, 0.35);
+    }
   </style>
 
   <section class="card">
     <canvas id="spending-chart" height="320"></canvas>
+    <div class="overview-container" id="overview-container">
+      <canvas id="spending-overview-chart" height="80"></canvas>
+      <div class="brush-hitbox" id="brush-hitbox">
+        <div class="brush-selection" id="brush-selection">
+          <span class="brush-handle" id="brush-handle-start" aria-hidden="true"></span>
+          <span class="brush-handle" id="brush-handle-end" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="card" id="transactions-card" hidden>
@@ -76,15 +134,17 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script>
     const palette = [
-      // Combined Paul Tol colourblind-safe schemes to maximise distinct hues.
       '#4477AA', '#66CCEE', '#228833', '#CCBB44', '#EE6677', '#AA3377', '#BBBBBB',
       '#EE7733', '#0077BB', '#33BBEE', '#009988', '#CC3311', '#EE3377', '#117733',
       '#88CCEE', '#44AA99', '#DDCC77', '#CC6677', '#AA4499', '#77AADD', '#99DDFF',
       '#44BB99', '#BBCC33', '#EE8866', '#FFAABB'
     ];
     const colorAssignments = new Map();
+
+    const spendingDataEndpoint = "{% url 'spaces:spending-data' %}";
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const summaryDaysDefault = {{ summary_days }};
+    const overviewDays = 1825;
     const initialCategory = "{{ initial_category|escapejs }}";
     const initialCounterparty = "{{ initial_counterparty|escapejs }}";
     const initialSearch = "{{ initial_search|escapejs }}";
@@ -93,13 +153,34 @@
     const categoryPathBase = `${normalizedBasePath}category/`;
     const counterpartyBaseUrl = "{{ counterparty_base_url|escapejs }}";
     const counterpartyPathBase = counterpartyBaseUrl.endsWith('/') ? counterpartyBaseUrl : `${counterpartyBaseUrl}/`;
-    let spendingSummary = null;
+
     let chartInstance = null;
+    let overviewChart = null;
+    let overviewSummary = null;
+    let overviewDates = [];
+    let currentSummary = null;
     let currentFilter = null;
     let currentTransactions = [];
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
     let chartMode = 'default';
+    const currentRange = { start: null, end: null, bucket: 'month', days: summaryDaysDefault };
+    const brushState = {
+      committedStart: 0,
+      committedEnd: 0,
+      previewStart: 0,
+      previewEnd: 0,
+      dragging: null,
+      pointerStartX: 0,
+      originalStart: 0,
+      originalEnd: 0,
+    };
+    const brushElements = {
+      hitbox: null,
+      selection: null,
+      startHandle: null,
+      endHandle: null,
+    };
     const STACK_CONFIG = {
       category: {
         mode: 'counterparty',
@@ -113,12 +194,94 @@
       },
     };
     let selectedCategory = null;
-    async function loadSpendingData() {
-      const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
+    let rangeRequestId = 0;
+
+    function hashLabel(label) {
+      const normalised = (label || 'uncategorised').trim().toLowerCase();
+      if (!colorAssignments.has(normalised)) {
+        let hash = 0;
+        for (let i = 0; i < normalised.length; i += 1) {
+          hash = ((hash << 5) - hash) + normalised.charCodeAt(i);
+          hash |= 0;
+        }
+        const index = Math.abs(hash) % palette.length;
+        colorAssignments.set(normalised, palette[index]);
+      }
+      return colorAssignments.get(normalised);
+    }
+
+    async function fetchSpendingData(params = {}) {
+      const query = new URLSearchParams();
+      if (typeof params.days === 'number') {
+        query.set('days', params.days);
+      }
+      if (params.start) {
+        query.set('start', params.start);
+      }
+      if (params.end) {
+        query.set('end', params.end);
+      }
+      if (params.reference) {
+        query.set('reference', params.reference);
+      }
+      const url = query.toString() ? `${spendingDataEndpoint}?${query.toString()}` : spendingDataEndpoint;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Unable to load spending data');
       }
       return response.json();
+    }
+
+    function parseIsoDate(value) {
+      if (!value) {
+        return null;
+      }
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function computeExclusiveEnd(date, bucket) {
+      if (!date) {
+        return null;
+      }
+      const next = new Date(date.getTime());
+      if (bucket === 'day') {
+        next.setUTCDate(next.getUTCDate() + 1);
+      } else if (bucket === 'week') {
+        next.setUTCDate(next.getUTCDate() + 7);
+      } else {
+        next.setUTCMonth(next.getUTCMonth() + 1);
+      }
+      return next;
+    }
+
+    function derivePeriodKey(transactionIso, bucket) {
+      const date = new Date(transactionIso);
+      if (Number.isNaN(date.getTime())) {
+        return null;
+      }
+      if (bucket === 'day') {
+        return date.toISOString().slice(0, 10);
+      }
+      if (bucket === 'week') {
+        const normalized = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const weekday = normalized.getUTCDay();
+        const diff = (weekday + 6) % 7;
+        normalized.setUTCDate(normalized.getUTCDate() - diff);
+        return normalized.toISOString().slice(0, 10);
+      }
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      return `${date.getUTCFullYear()}-${month}-01`;
+    }
+
+    function buildDefaultDatasets(series) {
+      return series.map((item) => ({
+        label: item.category,
+        data: item.values,
+        backgroundColor: hashLabel(item.category),
+        stack: 'spend-stack',
+        currency: item.currency || 'GBP',
+      }));
     }
 
     function sortTransactions(data) {
@@ -153,49 +316,18 @@
       });
     }
 
-    function hashLabel(label) {
-      const normalised = (label || 'uncategorised').trim().toLowerCase();
-      if (!colorAssignments.has(normalised)) {
-        let hash = 0;
-        for (let i = 0; i < normalised.length; i += 1) {
-          hash = ((hash << 5) - hash) + normalised.charCodeAt(i);
-          hash |= 0; // force into 32-bit space for portability
-        }
-        const index = Math.abs(hash) % palette.length;
-        colorAssignments.set(normalised, palette[index]);
-      }
-      return colorAssignments.get(normalised);
-    }
-
-    function buildDefaultDatasets(series) {
-      return series.map((item) => ({
-        label: item.category,
-        data: item.values,
-        backgroundColor: hashLabel(item.category),
-        stack: 'spend-stack',
-        currency: item.currency || 'GBP',
-      }));
-    }
-
     function applyDefaultDatasets() {
-      if (!chartInstance || !spendingSummary) {
+      if (!chartInstance || !currentSummary) {
         return;
       }
       chartMode = 'default';
-      chartInstance.data.labels = [...spendingSummary.dates];
-      chartInstance.data.datasets = buildDefaultDatasets(spendingSummary.series);
+      chartInstance.data.labels = [...currentSummary.dates];
+      chartInstance.data.datasets = buildDefaultDatasets(currentSummary.series);
       chartInstance.update();
     }
 
-    function formatMonthKey(isoString) {
-      const dt = new Date(isoString);
-      const year = dt.getUTCFullYear();
-      const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
-      return `${year}-${month}-01`;
-    }
-
     function applyStackedDatasets(filterType, transactions) {
-      if (!chartInstance || !spendingSummary) {
+      if (!chartInstance || !currentSummary) {
         return;
       }
       const config = STACK_CONFIG[filterType];
@@ -204,7 +336,8 @@
         return;
       }
 
-      const monthLabels = new Set(spendingSummary.dates);
+      const bucket = currentSummary.bucket || 'month';
+      const labelsSet = new Set(currentSummary.dates);
       const aggregates = new Map();
 
       transactions.forEach((txn) => {
@@ -212,28 +345,31 @@
         if (amount <= 0) {
           return;
         }
-        const monthKey = formatMonthKey(txn.transactionTime);
-        monthLabels.add(monthKey);
-        const key = config.labelForTxn(txn);
-        if (!aggregates.has(key)) {
-          aggregates.set(key, { totals: new Map(), total: 0, currency: txn.currency || 'GBP' });
+        const periodKey = derivePeriodKey(txn.transactionTime, bucket);
+        if (!periodKey) {
+          return;
         }
-        const entry = aggregates.get(key);
-        entry.totals.set(monthKey, (entry.totals.get(monthKey) || 0) + amount);
+        labelsSet.add(periodKey);
+        const label = config.labelForTxn(txn);
+        if (!aggregates.has(label)) {
+          aggregates.set(label, { totals: new Map(), total: 0, currency: txn.currency || 'GBP' });
+        }
+        const entry = aggregates.get(label);
+        entry.totals.set(periodKey, (entry.totals.get(periodKey) || 0) + amount);
         entry.total += amount;
       });
 
-      const labels = Array.from(monthLabels).sort();
       if (!aggregates.size) {
         applyDefaultDatasets();
         return;
       }
 
+      const labels = Array.from(labelsSet).sort();
       const datasets = Array.from(aggregates.entries())
         .sort((a, b) => b[1].total - a[1].total)
         .map(([name, data]) => ({
           label: name,
-          data: labels.map((label) => (data.totals.get(label) || 0) / 100),
+          data: labels.map((labelKey) => (data.totals.get(labelKey) || 0) / 100),
           backgroundColor: hashLabel(name),
           stack: config.stack,
           currency: data.currency,
@@ -243,6 +379,17 @@
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
       chartInstance.update();
+    }
+
+    function reapplyChartMode() {
+      if (!chartInstance || !currentSummary) {
+        return;
+      }
+      if (currentFilter && STACK_CONFIG[currentFilter.type]) {
+        applyStackedDatasets(currentFilter.type, currentTransactions);
+      } else {
+        applyDefaultDatasets();
+      }
     }
 
     function renderTransactionsTable() {
@@ -258,7 +405,6 @@
 
       card.hidden = false;
       title.textContent = currentFilter.label ? `Transactions: ${currentFilter.label}` : 'Transactions';
-
       tbody.innerHTML = '';
 
       if (currentTransactionsMessage) {
@@ -343,20 +489,21 @@
       currentTransactionsMessage = null;
       selectedCategory = null;
       renderTransactionsTable();
-      applyDefaultDatasets();
+      reapplyChartMode();
     }
 
-    async function loadTransactions(filter) {
-      if (!spendingSummary) {
+    async function loadTransactions(filter, options = {}) {
+      if (!currentRange.start || !currentRange.end) {
         return;
       }
       const prepared = { ...filter, label: filter.label || filter.value };
-      showTransactionsLoading(prepared);
+      if (!options.preserveMessage) {
+        showTransactionsLoading(prepared);
+      }
 
-      const params = new URLSearchParams({
-        days: spendingSummary.days ?? summaryDaysDefault,
-        reference: spendingSummary.reference,
-      });
+      const params = new URLSearchParams();
+      params.set('start', currentRange.start.toISOString());
+      params.set('end', currentRange.end.toISOString());
       if (prepared.type === 'category') {
         params.set('category', prepared.value);
       } else if (prepared.type === 'counterparty') {
@@ -378,7 +525,7 @@
         if (STACK_CONFIG[prepared.type]) {
           applyStackedDatasets(prepared.type, currentTransactions);
         } else {
-          applyDefaultDatasets();
+          reapplyChartMode();
         }
       } catch (error) {
         currentFilter = prepared;
@@ -388,7 +535,7 @@
         if (STACK_CONFIG[prepared.type]) {
           applyStackedDatasets(prepared.type, []);
         } else {
-          applyDefaultDatasets();
+          reapplyChartMode();
         }
       }
     }
@@ -423,7 +570,7 @@
         event,
         'nearest',
         { intersect: true },
-        false
+        false,
       );
       if (!points.length) {
         return;
@@ -450,10 +597,263 @@
       void loadTransactions(filter);
     }
 
-    async function renderChart() {
-      spendingSummary = await loadSpendingData();
-      const ctx = document.getElementById('spending-chart').getContext('2d');
+    function buildOverviewDataset(summary) {
+      return summary.dates.map((_, index) => {
+        const total = summary.series.reduce((acc, series) => acc + (series.minorValues[index] || 0), 0);
+        return total / 100;
+      });
+    }
 
+    function renderOverviewChart() {
+      if (!overviewSummary) {
+        return;
+      }
+      const ctx = document.getElementById('spending-overview-chart').getContext('2d');
+      const data = buildOverviewDataset(overviewSummary);
+      overviewChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [...overviewSummary.dates],
+          datasets: [
+            {
+              label: 'Total spend',
+              data,
+              borderColor: '#34d399',
+              backgroundColor: 'rgba(52, 211, 153, 0.15)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: false },
+          },
+          elements: {
+            line: { borderWidth: 1.2 },
+          },
+          scales: {
+            x: {
+              display: false,
+            },
+            y: {
+              display: false,
+            },
+          },
+        },
+      });
+    }
+
+    function renderBrush(startIndex, endIndex) {
+      if (!overviewSummary || !brushElements.hitbox) {
+        return;
+      }
+      const count = overviewSummary.dates.length;
+      const width = brushElements.hitbox.clientWidth;
+      if (!count || !width) {
+        return;
+      }
+      const clampedStart = Math.max(0, Math.min(startIndex, count - 1));
+      const clampedEnd = Math.max(0, Math.min(endIndex, count - 1));
+      const startRatio = clampedStart / count;
+      const endRatio = Math.min((clampedEnd + 1) / count, 1);
+      const left = startRatio * width;
+      const brushWidth = Math.max((endRatio - startRatio) * width, 12);
+      brushElements.selection.style.left = `${left}px`;
+      brushElements.selection.style.width = `${brushWidth}px`;
+    }
+
+    function setBrushPreview(startIndex, endIndex) {
+      brushState.previewStart = startIndex;
+      brushState.previewEnd = endIndex;
+      renderBrush(brushState.previewStart, brushState.previewEnd);
+    }
+
+    function setBrushIndices(startIndex, endIndex) {
+      brushState.committedStart = startIndex;
+      brushState.committedEnd = endIndex;
+      brushState.previewStart = startIndex;
+      brushState.previewEnd = endIndex;
+      renderBrush(startIndex, endIndex);
+    }
+
+    function pixelToIndex(x) {
+      if (!overviewSummary || !brushElements.hitbox) {
+        return 0;
+      }
+      const width = brushElements.hitbox.clientWidth;
+      const count = overviewSummary.dates.length;
+      if (!width || !count) {
+        return 0;
+      }
+      const ratio = Math.min(Math.max(x / width, 0), 0.999999);
+      const index = Math.floor(ratio * count);
+      return Math.max(0, Math.min(count - 1, index));
+    }
+
+    function beginBrushDrag(event, mode) {
+      if (!overviewSummary) {
+        return;
+      }
+      event.preventDefault();
+      brushState.dragging = mode;
+      brushState.pointerStartX = event.clientX;
+      brushState.originalStart = brushState.previewStart;
+      brushState.originalEnd = brushState.previewEnd;
+      brushElements.selection.classList.add('dragging');
+      window.addEventListener('pointermove', handleBrushPointerMove);
+      window.addEventListener('pointerup', handleBrushPointerUp);
+    }
+
+    function handleBrushPointerMove(event) {
+      if (!brushState.dragging || !overviewSummary || !brushElements.hitbox) {
+        return;
+      }
+      const rect = brushElements.hitbox.getBoundingClientRect();
+      if (brushState.dragging === 'start') {
+        const x = event.clientX - rect.left;
+        let newStart = pixelToIndex(x);
+        newStart = Math.min(newStart, brushState.previewEnd);
+        setBrushPreview(newStart, brushState.previewEnd);
+      } else if (brushState.dragging === 'end') {
+        const x = event.clientX - rect.left;
+        let newEnd = pixelToIndex(x);
+        newEnd = Math.max(newEnd, brushState.previewStart);
+        setBrushPreview(brushState.previewStart, newEnd);
+      } else {
+        const width = brushElements.hitbox.clientWidth;
+        const count = overviewSummary.dates.length;
+        if (!width || !count) {
+          return;
+        }
+        const deltaPixels = event.clientX - brushState.pointerStartX;
+        const deltaRatio = deltaPixels / width;
+        const deltaIndex = Math.round(deltaRatio * count);
+        let newStart = brushState.originalStart + deltaIndex;
+        let newEnd = brushState.originalEnd + deltaIndex;
+        const span = brushState.originalEnd - brushState.originalStart;
+        if (newStart < 0) {
+          newEnd -= newStart;
+          newStart = 0;
+        }
+        if (newEnd > count - 1) {
+          const overshoot = newEnd - (count - 1);
+          newStart -= overshoot;
+          newEnd = count - 1;
+        }
+        newStart = Math.max(0, newStart);
+        newEnd = Math.max(newStart, Math.min(count - 1, newStart + span));
+        setBrushPreview(newStart, newEnd);
+      }
+    }
+
+    async function handleBrushPointerUp() {
+      window.removeEventListener('pointermove', handleBrushPointerMove);
+      window.removeEventListener('pointerup', handleBrushPointerUp);
+      brushElements.selection.classList.remove('dragging');
+      if (!overviewSummary) {
+        brushState.dragging = null;
+        return;
+      }
+      const startIndex = brushState.previewStart;
+      const endIndex = brushState.previewEnd;
+      brushState.dragging = null;
+      setBrushIndices(startIndex, endIndex);
+      await applyRangeSelectionFromIndices();
+    }
+
+    function computeRangeFromIndices(startIndex, endIndex) {
+      const startDate = parseIsoDate(overviewSummary.dates[startIndex]);
+      const endBase = parseIsoDate(overviewSummary.dates[endIndex]);
+      const exclusiveEnd = computeExclusiveEnd(endBase, overviewSummary.bucket || 'month');
+      return { startDate, exclusiveEnd };
+    }
+
+    async function applyRangeSelectionFromIndices(options = {}) {
+      if (!overviewSummary) {
+        return;
+      }
+      const { startDate, exclusiveEnd } = computeRangeFromIndices(
+        brushState.committedStart,
+        brushState.committedEnd,
+      );
+      if (!startDate || !exclusiveEnd) {
+        return;
+      }
+      currentRange.start = startDate;
+      currentRange.end = exclusiveEnd;
+      const requestId = ++rangeRequestId;
+      try {
+        const summary = await fetchSpendingData({
+          start: startDate.toISOString(),
+          end: exclusiveEnd.toISOString(),
+        });
+        if (requestId !== rangeRequestId) {
+          return;
+        }
+        currentSummary = summary;
+        currentRange.bucket = summary.bucket || 'month';
+        currentRange.days = summary.days;
+        reapplyChartMode();
+        if (currentFilter && options.retainTransactions !== false) {
+          await loadTransactions(currentFilter, { preserveMessage: true });
+        }
+      } catch (error) {
+        console.error('Unable to update chart for selected range', error);
+      }
+    }
+
+    function computeDefaultRangeIndices() {
+      if (!overviewSummary || !overviewSummary.dates.length) {
+        return { start: 0, end: 0 };
+      }
+      const reference = new Date(overviewSummary.reference || Date.now());
+      const targetStart = new Date(reference.getTime());
+      targetStart.setUTCDate(targetStart.getUTCDate() - summaryDaysDefault);
+      const endIndex = overviewSummary.dates.length - 1;
+      let startIndex = overviewDates.findIndex((date) => date && date >= targetStart);
+      if (startIndex === -1) {
+        startIndex = Math.max(0, endIndex - Math.ceil(summaryDaysDefault / 30));
+      }
+      startIndex = Math.max(0, Math.min(startIndex, endIndex));
+      return { start: startIndex, end: endIndex };
+    }
+
+    function setupBrushInteractions() {
+      brushElements.hitbox = document.getElementById('brush-hitbox');
+      brushElements.selection = document.getElementById('brush-selection');
+      brushElements.startHandle = document.getElementById('brush-handle-start');
+      brushElements.endHandle = document.getElementById('brush-handle-end');
+      if (!brushElements.hitbox || !brushElements.selection) {
+        return;
+      }
+      brushElements.startHandle.addEventListener('pointerdown', (event) => beginBrushDrag(event, 'start'));
+      brushElements.endHandle.addEventListener('pointerdown', (event) => beginBrushDrag(event, 'end'));
+      brushElements.selection.addEventListener('pointerdown', (event) => {
+        if (event.target === brushElements.startHandle || event.target === brushElements.endHandle) {
+          return;
+        }
+        beginBrushDrag(event, 'move');
+      });
+      window.addEventListener('resize', () => {
+        renderBrush(brushState.previewStart, brushState.previewEnd);
+      });
+    }
+
+    async function renderChart() {
+      try {
+        overviewSummary = await fetchSpendingData({ days: overviewDays });
+        overviewDates = overviewSummary.dates.map(parseIsoDate);
+      } catch (error) {
+        console.error('Unable to load overview data', error);
+        return;
+      }
+
+      const ctx = document.getElementById('spending-chart').getContext('2d');
       chartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -470,9 +870,9 @@
                   const value = context.raw || 0;
                   const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: context.dataset.currency });
                   return `${context.dataset.label}: ${formatter.format(value)}`;
-                }
-              }
-            }
+                },
+              },
+            },
           },
           scales: {
             x: { stacked: true },
@@ -484,50 +884,54 @@
                   const currency = firstDataset?.currency || 'GBP';
                   const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 });
                   return formatter.format(value);
-                }
-              }
-            }
-          }
-        }
+                },
+              },
+            },
+          },
+        },
       });
 
-      applyDefaultDatasets();
+      renderOverviewChart();
+      setupBrushInteractions();
+
+      const defaultRange = computeDefaultRangeIndices();
+      setBrushIndices(defaultRange.start, defaultRange.end);
+      await applyRangeSelectionFromIndices({ retainTransactions: false });
 
       document.getElementById('spending-chart').addEventListener('click', handleChartClick);
       document.getElementById('reset-selection').addEventListener('click', resetSelection);
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
         th.addEventListener('click', handleSortClick);
       });
-      if (initialCategory && spendingSummary.series.some((item) => item.category === initialCategory)) {
+
+      if (initialCategory && currentSummary?.series?.some((item) => item.category === initialCategory)) {
         const filter = { type: 'category', value: initialCategory, label: initialCategory };
         window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
-        void loadTransactions(filter);
+        await loadTransactions(filter);
         return;
       }
+
       if (initialCounterparty) {
         const filter = { type: 'counterparty', value: initialCounterparty, label: initialCounterparty };
         window.history.replaceState({}, '', `${counterpartyPathBase}${encodeURIComponent(initialCounterparty)}/`);
-        void loadTransactions(filter);
+        await loadTransactions(filter);
         return;
       }
+
       if (initialSearch) {
         const safeSearch = initialSearch.trim();
-        const filter = {
-          type: 'search',
-          value: safeSearch,
-          label: safeSearch ? `Search for "${safeSearch}"` : 'Search results',
-        };
         if (safeSearch) {
+          const filter = { type: 'search', value: safeSearch, label: `Search for "${safeSearch}"` };
           window.history.replaceState({}, '', `${normalizedBasePath}?search=${encodeURIComponent(safeSearch)}`);
-          void loadTransactions(filter);
+          await loadTransactions(filter);
           return;
         }
       }
+
       window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();
     }
 
-    
     document.addEventListener('DOMContentLoaded', renderChart);
   </script>
 {% endblock %}
