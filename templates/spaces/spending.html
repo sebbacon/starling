@@ -76,8 +76,13 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script>
     const palette = [
-      '#35b779', '#31688e', '#fde725', '#440154', '#f8961e', '#577590', '#43aa8b', '#f9c74f', '#90be6d', '#f3722c'
+      // Combined Paul Tol colourblind-safe schemes to maximise distinct hues.
+      '#4477AA', '#66CCEE', '#228833', '#CCBB44', '#EE6677', '#AA3377', '#BBBBBB',
+      '#EE7733', '#0077BB', '#33BBEE', '#009988', '#CC3311', '#EE3377', '#117733',
+      '#88CCEE', '#44AA99', '#DDCC77', '#CC6677', '#AA4499', '#77AADD', '#99DDFF',
+      '#44BB99', '#BBCC33', '#EE8866', '#FFAABB'
     ];
+    const colorAssignments = new Map();
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const summaryDaysDefault = {{ summary_days }};
     const initialCategory = "{{ initial_category|escapejs }}";
@@ -94,25 +99,15 @@
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
     let chartMode = 'default';
-    const colorCaches = {
-      counterparty: new Map(),
-      category: new Map(),
-    };
-    const colorIndices = {
-      counterparty: 0,
-      category: 0,
-    };
     const STACK_CONFIG = {
       category: {
         mode: 'counterparty',
         stack: 'counterparty-stack',
-        cacheKey: 'counterparty',
         labelForTxn: (txn) => (txn.counterparty && txn.counterparty.trim()) || txn.spaceName || txn.source || 'Other',
       },
       counterparty: {
         mode: 'category',
         stack: 'category-stack',
-        cacheKey: 'category',
         labelForTxn: (txn) => txn.category || 'Uncategorised',
       },
     };
@@ -157,11 +152,25 @@
       });
     }
 
+    function hashLabel(label) {
+      const normalised = (label || 'uncategorised').trim().toLowerCase();
+      if (!colorAssignments.has(normalised)) {
+        let hash = 0;
+        for (let i = 0; i < normalised.length; i += 1) {
+          hash = ((hash << 5) - hash) + normalised.charCodeAt(i);
+          hash |= 0; // force into 32-bit space for portability
+        }
+        const index = Math.abs(hash) % palette.length;
+        colorAssignments.set(normalised, palette[index]);
+      }
+      return colorAssignments.get(normalised);
+    }
+
     function buildDefaultDatasets(series) {
-      return series.map((item, index) => ({
+      return series.map((item) => ({
         label: item.category,
         data: item.values,
-        backgroundColor: palette[index % palette.length],
+        backgroundColor: hashLabel(item.category),
         stack: 'spend-stack',
         currency: item.currency || 'GBP',
       }));
@@ -182,19 +191,6 @@
       const year = dt.getUTCFullYear();
       const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
       return `${year}-${month}-01`;
-    }
-
-    function getColorFromCache(cacheKey, label) {
-      const cache = colorCaches[cacheKey];
-      if (!cache) {
-        return palette[0];
-      }
-      if (!cache.has(label)) {
-        const index = colorIndices[cacheKey] % palette.length;
-        cache.set(label, palette[index]);
-        colorIndices[cacheKey] += 1;
-      }
-      return cache.get(label);
     }
 
     function applyStackedDatasets(filterType, transactions) {
@@ -237,7 +233,7 @@
         .map(([name, data]) => ({
           label: name,
           data: labels.map((label) => (data.totals.get(label) || 0) / 100),
-          backgroundColor: getColorFromCache(config.cacheKey, name),
+          backgroundColor: hashLabel(name),
           stack: config.stack,
           currency: data.currency,
         }));
