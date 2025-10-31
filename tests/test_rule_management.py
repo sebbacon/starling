@@ -130,3 +130,11 @@ def test_json_path_lookup_returns_paths(sample_feed_item):
     assert response.status_code == 200
     payload = response.json()
     assert any(path.startswith("merchant.") for path in payload["results"])
+
+
+def test_json_path_lookup_returns_all_on_focus(sample_feed_item):
+    client = Client()
+    response = client.get(reverse("spaces:json-path-lookup"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert "merchant.name" in payload["results"]

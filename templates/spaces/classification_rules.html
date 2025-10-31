@@ -425,24 +425,24 @@
         return payload.results || [];
       }
 
+      async function requestSuggestions(term) {
+        try {
+          const items = await fetchSuggestions(term);
+          renderSuggestions(items);
+        } catch (error) {
+          console.error(error);
+          clearSuggestions();
+        }
+      }
+
       searchInput.addEventListener('input', () => {
         const term = searchInput.value.trim();
-        hiddenInput.value = term;
+        hiddenInput.value = '';
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
-        if (!term) {
-          clearSuggestions();
-          return;
-        }
-        timeoutId = setTimeout(async () => {
-          try {
-            const items = await fetchSuggestions(term);
-            renderSuggestions(items);
-          } catch (error) {
-            console.error(error);
-            clearSuggestions();
-          }
+        timeoutId = setTimeout(() => {
+          void requestSuggestions(term);
         }, 200);
       });
 
@@ -451,6 +451,17 @@
           clearSuggestions();
         }
       });
+
+      searchInput.addEventListener('focus', () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        void requestSuggestions(searchInput.value.trim());
+      });
+
+      if (!searchInput.value) {
+        void requestSuggestions('');
+      }
     }());
   </script>
 {% endblock %}

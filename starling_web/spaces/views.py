@@ -340,8 +340,6 @@ def space_lookup(request):
 @require_GET
 def json_path_lookup(request):
     term = (request.GET.get("q") or "").strip()
-    if not term:
-        return JsonResponse({"results": []})
 
     collected = []
     seen = set()
@@ -362,7 +360,10 @@ def json_path_lookup(request):
     queryset = FeedItem.objects.exclude(raw_json={}).order_by("-transaction_time")[:200]
     for item in queryset:
         for path in iter_paths(item.raw_json):
-            if term.lower() in path.lower() and path not in seen:
+            if term:
+                if term.lower() not in path.lower():
+                    continue
+            if path not in seen:
                 seen.add(path)
                 collected.append(path)
             if len(collected) >= 10:
