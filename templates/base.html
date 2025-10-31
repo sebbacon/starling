@@ -90,7 +90,13 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 1rem;
         padding: 0.75rem 0;
+      }
+      .nav__group {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
       }
       .nav__brand {
         color: #f9fafb;
@@ -110,6 +116,34 @@
       .nav__links a:hover {
         color: #34d399;
       }
+      .nav__form {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .nav__form input[type="search"] {
+        background: rgba(31, 41, 55, 0.85);
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        border-radius: 20px;
+        padding: 0.35rem 0.75rem;
+        color: #e5e7eb;
+        min-width: 220px;
+      }
+      .nav__form input[type="search"]::placeholder {
+        color: rgba(229, 231, 235, 0.55);
+      }
+      .nav__form button {
+        background: #34d399;
+        color: #101215;
+        border: none;
+        border-radius: 999px;
+        padding: 0.35rem 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .nav__form button:hover {
+        background: #10b981;
+      }
       main {
         padding-top: 1.5rem;
       }
@@ -119,11 +153,22 @@
   <body>
     <header class="nav">
       <div class="nav__inner">
-        <a class="nav__brand" href="/">Starling Spaces</a>
-        <nav class="nav__links">
-          <a href="/">Overview</a>
-          <a href="/spending/">Spending</a>
-        </nav>
+        <div class="nav__group">
+          <a class="nav__brand" href="/">Starling Spaces</a>
+          <nav class="nav__links">
+            <a href="/">Overview</a>
+            <a href="/spending/">Spending</a>
+          </nav>
+        </div>
+        <form class="nav__form" action="/spending/" method="get">
+          <input
+            type="search"
+            name="search"
+            value="{{ request.GET.search|default:'' }}"
+            placeholder="Search counterparty or amount"
+          />
+          <button type="submit">Search</button>
+        </form>
       </div>
     </header>
     <main>

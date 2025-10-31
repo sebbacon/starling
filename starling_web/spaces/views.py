@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -22,6 +24,8 @@ def spending(request, category_name=None, counterparty_name=None):
     except ValueError:
         days = default_days
 
+    search_query = (request.GET.get("search") or "").strip()
+
     counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
@@ -32,6 +36,7 @@ def spending(request, category_name=None, counterparty_name=None):
             "summary_days": days,
             "initial_category": category_name or "",
             "initial_counterparty": counterparty_name or "",
+            "initial_search": search_query,
             "base_spending_url": reverse("spaces:spending"),
             "counterparty_base_url": counterparty_base,
         },
@@ -55,8 +60,10 @@ def spending_data(request):
 def spending_transactions(request):
     category = request.GET.get("category")
     counterparty = request.GET.get("counterparty")
+    search = (request.GET.get("search") or "").strip()
     if not category and not counterparty:
-        return JsonResponse({"error": "category or counterparty is required"}, status=400)
+        if not search:
+            return JsonResponse({"error": "category, counterparty, or search is required"}, status=400)
 
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -94,6 +101,13 @@ def spending_transactions(request):
     if counterparty:
         queryset = queryset.filter(counterparty__iexact=counterparty)
 
+    if search:
+        amount_minor = _parse_amount_minor_units(search)
+        search_filter = Q(counterparty__icontains=search)
+        if amount_minor is not None:
+            search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
+        queryset = queryset.filter(search_filter)
+
     space_names = {
         (cat.account_uid, cat.category_uid): cat.name
         for cat in Category.objects.filter(category_type="space")
@@ -128,6 +142,8 @@ def spending_transactions(request):
         response["category"] = category
     if counterparty:
         response["counterparty"] = counterparty
+    if search:
+        response["search"] = search
     return JsonResponse(response)
 
 
@@ -158,3 +174,24 @@ def _parse_reference_time(value):
     else:
         parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+def _parse_amount_minor_units(value):
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    cleaned = cleaned.replace(",", "")
+    if cleaned.startswith("£"):
+        cleaned = cleaned[1:]
+    if not cleaned:
+        return None
+    try:
+        amount = Decimal(cleaned)
+    except (InvalidOperation, ValueError):
+        return None
+    try:
+        quantised = amount.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return None
+    minor_units = int(abs(quantised * 100))
+    return minor_units

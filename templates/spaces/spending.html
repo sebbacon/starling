@@ -87,6 +87,7 @@
     const summaryDaysDefault = {{ summary_days }};
     const initialCategory = "{{ initial_category|escapejs }}";
     const initialCounterparty = "{{ initial_counterparty|escapejs }}";
+    const initialSearch = "{{ initial_search|escapejs }}";
     const baseSpendingUrl = "{{ base_spending_url|escapejs }}";
     const normalizedBasePath = baseSpendingUrl.endsWith('/') ? baseSpendingUrl : `${baseSpendingUrl}/`;
     const categoryPathBase = `${normalizedBasePath}category/`;
@@ -360,6 +361,8 @@
         params.set('category', prepared.value);
       } else if (prepared.type === 'counterparty') {
         params.set('counterparty', prepared.value);
+      } else if (prepared.type === 'search') {
+        params.set('search', prepared.value);
       }
 
       try {
@@ -506,6 +509,19 @@
         window.history.replaceState({}, '', `${counterpartyPathBase}${encodeURIComponent(initialCounterparty)}/`);
         void loadTransactions(filter);
         return;
+      }
+      if (initialSearch) {
+        const safeSearch = initialSearch.trim();
+        const filter = {
+          type: 'search',
+          value: safeSearch,
+          label: safeSearch ? `Search for "${safeSearch}"` : 'Search results',
+        };
+        if (safeSearch) {
+          window.history.replaceState({}, '', `${normalizedBasePath}?search=${encodeURIComponent(safeSearch)}`);
+          void loadTransactions(filter);
+          return;
+        }
       }
       window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();

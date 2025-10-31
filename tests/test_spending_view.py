@@ -131,6 +131,14 @@ def test_spending_page_prefills_counterparty_path(settings):
     assert response.context["initial_category"] == ""
 
 
+def test_spending_page_prefills_search_query(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(reverse("spaces:spending"), {"search": "Merchant"})
+    assert response.status_code == 200
+    assert response.context["initial_search"] == "Merchant"
+
+
 def test_spending_data_groups_by_spending_category(settings):
     _seed_transactions()
     client = Client()
@@ -239,6 +247,36 @@ def test_spending_transactions_can_filter_counterparty(settings):
     assert payload["counterparty"] == "Merchant"
     assert payload["count"] == 1
     assert payload["transactions"][0]["counterparty"] == "Merchant"
+
+
+def test_spending_transactions_can_search_counterparty(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "search": "Merchant",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["count"] == 1
+    assert payload["transactions"][0]["counterparty"] == "Merchant"
+
+
+def test_spending_transactions_can_search_amount(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "search": "30",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    ids = [txn["feedItemUid"] for txn in payload["transactions"]]
+    assert ids == ["item-main"]
 
 
 def test_spending_transactions_requires_filter():
