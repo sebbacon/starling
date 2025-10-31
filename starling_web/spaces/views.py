@@ -120,7 +120,7 @@ def spending_transactions(request):
             queryset = queryset.filter(classified_category=category)
 
     if counterparty:
-        queryset = queryset.filter(counterparty=counterparty)
+        queryset = queryset.filter(counterparty__iexact=counterparty)
 
     space_names = {
         (cat.account_uid, cat.category_uid): cat.name
