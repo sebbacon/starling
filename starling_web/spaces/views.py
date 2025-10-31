@@ -337,6 +337,42 @@ def space_lookup(request):
     return JsonResponse({"results": results})
 
 
+@require_GET
+def json_path_lookup(request):
+    term = (request.GET.get("q") or "").strip()
+    if not term:
+        return JsonResponse({"results": []})
+
+    collected = []
+    seen = set()
+
+    def iter_paths(data, prefix=None):
+        if isinstance(data, dict):
+            for key, value in data.items():
+                next_prefix = f"{prefix}.{key}" if prefix else key
+                yield from iter_paths(value, next_prefix)
+        elif isinstance(data, list):
+            for index, value in enumerate(data[:5]):
+                next_prefix = f"{prefix}[{index}]" if prefix else f"[{index}]"
+                yield from iter_paths(value, next_prefix)
+        else:
+            if prefix:
+                yield prefix
+
+    queryset = FeedItem.objects.exclude(raw_json={}).order_by("-transaction_time")[:200]
+    for item in queryset:
+        for path in iter_paths(item.raw_json):
+            if term.lower() in path.lower() and path not in seen:
+                seen.add(path)
+                collected.append(path)
+            if len(collected) >= 10:
+                break
+        if len(collected) >= 10:
+            break
+
+    return JsonResponse({"results": collected})
+
+
 def _parse_positive_int(value, default):
     if not value:
         return default

@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
+
 import pytest
 from django.test import Client
 from django.urls import reverse
 
-from starling_web.spaces.models import ClassificationRule
+from starling_web.spaces.models import ClassificationRule, FeedItem
 
 
 pytestmark = pytest.mark.django_db
@@ -11,6 +13,32 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def clear_default_rules():
     ClassificationRule.objects.all().delete()
+
+
+@pytest.fixture
+def sample_feed_item(db):
+    FeedItem.objects.create(
+        feed_item_uid="json-1",
+        account_uid="acc-1",
+        category_uid="cat-1",
+        space_uid="space-1",
+        direction="OUT",
+        amount_minor_units=-5000,
+        currency="GBP",
+        transaction_time=datetime(2024, 11, 10, tzinfo=timezone.utc),
+        raw_json={
+            "merchant": {
+                "name": "Coffee Shop",
+                "category": "FOOD",
+            },
+            "meta": {
+                "tags": [
+                    {"type": "business"},
+                    {"type": "travel"},
+                ]
+            },
+        },
+    )
 
 
 def test_manage_rules_lists_existing():
@@ -94,3 +122,11 @@ def test_manage_rules_deletes_rule():
     )
     assert response.status_code == 302
     assert ClassificationRule.objects.count() == 0
+
+
+def test_json_path_lookup_returns_paths(sample_feed_item):
+    client = Client()
+    response = client.get(reverse("spaces:json-path-lookup"), {"q": "merchant"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(path.startswith("merchant.") for path in payload["results"])
