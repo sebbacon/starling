@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.views.decorators.http import require_GET
 from django.db.models.functions import Upper
 
@@ -42,7 +43,7 @@ def summary(request):
 
 
 @require_GET
-def spending(request):
+def spending(request, category_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
         days = _parse_positive_int(request.GET.get("days"), default_days)
@@ -52,7 +53,11 @@ def spending(request):
     return render(
         request,
         "spaces/spending.html",
-        {"summary_days": days},
+        {
+            "summary_days": days,
+            "initial_category": category_name or "",
+            "base_spending_url": reverse("spaces:spending"),
+        },
     )
 
 

@@ -101,12 +101,23 @@ def test_spending_page_renders(settings):
     assert "Spending Overview" in markup
     assert "href=\"/\"" in markup
     assert "days=365" in markup
+    assert response.context["initial_category"] == ""
+
+
 def test_spending_page_respects_custom_days(settings):
     _seed_transactions()
     client = Client()
     response = client.get(reverse("spaces:spending"), {"days": 180})
     assert response.status_code == 200
     assert "days=180" in response.content.decode()
+
+
+def test_spending_page_prefills_from_category_path(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(reverse("spaces:spending-category", args=["Dining"]))
+    assert response.status_code == 200
+    assert response.context["initial_category"] == "Dining"
 
 
 def test_spending_data_groups_by_spending_category(settings):

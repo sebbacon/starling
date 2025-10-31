@@ -80,6 +80,10 @@
     ];
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const summaryDaysDefault = {{ summary_days }};
+    const initialCategory = "{{ initial_category|escapejs }}";
+    const baseSpendingUrl = "{{ base_spending_url|escapejs }}";
+    const normalizedBasePath = baseSpendingUrl.endsWith('/') ? baseSpendingUrl : `${baseSpendingUrl}/`;
+    const categoryPathBase = `${normalizedBasePath}category/`;
     let spendingSummary = null;
     let chartInstance = null;
     let activeCategory = null;
@@ -245,7 +249,7 @@
       } catch (error) {
         currentCategoryLabel = category;
         currentTransactions = [];
-      currentTransactionsMessage = 'Unable to load transactions. Please try again.';
+        currentTransactionsMessage = 'Unable to load transactions. Please try again.';
         renderTransactionsTable();
       }
     }
@@ -258,6 +262,7 @@
         });
         chartInstance.update();
       }
+      window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();
     }
 
@@ -308,6 +313,7 @@
         ds.hidden = index !== datasetIndex;
       });
       chartInstance.update();
+      window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(selectedLabel)}/`);
       void loadTransactions(selectedLabel);
     }
 
@@ -362,6 +368,20 @@
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
         th.addEventListener('click', handleSortClick);
       });
+      if (initialCategory) {
+        const datasetIndex = chartInstance.data.datasets.findIndex((ds) => ds.label === initialCategory);
+        if (datasetIndex !== -1) {
+          activeCategory = initialCategory;
+          chartInstance.data.datasets.forEach((ds, index) => {
+            ds.hidden = index !== datasetIndex;
+          });
+          chartInstance.update();
+          window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
+          void loadTransactions(initialCategory);
+          return;
+        }
+      }
+      window.history.replaceState({}, '', normalizedBasePath);
       clearTransactions();
     }
 
