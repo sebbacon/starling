@@ -132,6 +132,76 @@
       });
     }
 
+    function buildDefaultDatasets(series) {
+      return series.map((item, index) => ({
+        label: item.category,
+        data: item.values,
+        backgroundColor: palette[index % palette.length],
+        stack: 'spend-stack',
+        currency: item.currency || 'GBP',
+      }));
+    }
+
+    function applyDefaultDatasets() {
+      if (!chartInstance || !spendingSummary) {
+        return;
+      }
+      chartInstance.data.labels = [...spendingSummary.dates];
+      chartInstance.data.datasets = buildDefaultDatasets(spendingSummary.series);
+      chartInstance.update();
+    }
+
+    function formatMonthKey(isoString) {
+      const dt = new Date(isoString);
+      const year = dt.getUTCFullYear();
+      const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      return `${year}-${month}-01`;
+    }
+
+    function applyCounterpartyDatasets(transactions) {
+      if (!chartInstance || !spendingSummary) {
+        return;
+      }
+      const monthLabels = new Set(spendingSummary.dates);
+      const aggregates = new Map();
+
+      transactions.forEach((txn) => {
+        const amount = Number(txn.amountMinorUnits || 0);
+        if (amount <= 0) {
+          return;
+        }
+        const monthKey = formatMonthKey(txn.transactionTime);
+        monthLabels.add(monthKey);
+        const key = (txn.counterparty && txn.counterparty.trim()) || txn.spaceName || txn.source || 'Other';
+        if (!aggregates.has(key)) {
+          aggregates.set(key, { totals: new Map(), total: 0, currency: txn.currency || 'GBP' });
+        }
+        const entry = aggregates.get(key);
+        entry.totals.set(monthKey, (entry.totals.get(monthKey) || 0) + amount);
+        entry.total += amount;
+      });
+
+      const labels = Array.from(monthLabels).sort();
+      if (!aggregates.size) {
+        applyDefaultDatasets();
+        return;
+      }
+
+      const datasets = Array.from(aggregates.entries())
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([name, data], index) => ({
+          label: name,
+          data: labels.map((label) => (data.totals.get(label) || 0) / 100),
+          backgroundColor: palette[index % palette.length],
+          stack: 'counterparty-stack',
+          currency: data.currency,
+        }));
+
+      chartInstance.data.labels = labels;
+      chartInstance.data.datasets = datasets;
+      chartInstance.update();
+    }
+
     function renderTransactionsTable() {
       const card = document.getElementById('transactions-card');
       const title = document.getElementById('transactions-title');
@@ -224,6 +294,7 @@
       currentTransactions = [];
       currentTransactionsMessage = null;
       renderTransactionsTable();
+      applyDefaultDatasets();
     }
 
     async function loadTransactions(category) {
@@ -246,11 +317,13 @@
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
         renderTransactionsTable();
+        applyCounterpartyDatasets(currentTransactions);
       } catch (error) {
         currentCategoryLabel = category;
         currentTransactions = [];
         currentTransactionsMessage = 'Unable to load transactions. Please try again.';
         renderTransactionsTable();
+        applyDefaultDatasets();
       }
     }
 
@@ -308,11 +381,6 @@
       }
 
       activeCategory = selectedLabel;
-
-      chartInstance.data.datasets.forEach((ds, index) => {
-        ds.hidden = index !== datasetIndex;
-      });
-      chartInstance.update();
       window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(selectedLabel)}/`);
       void loadTransactions(selectedLabel);
     }
@@ -363,6 +431,8 @@
         }
       });
 
+      applyDefaultDatasets();
+
       document.getElementById('spending-chart').addEventListener('click', handleChartClick);
       document.getElementById('reset-selection').addEventListener('click', resetSelection);
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
@@ -372,10 +442,6 @@
         const datasetIndex = chartInstance.data.datasets.findIndex((ds) => ds.label === initialCategory);
         if (datasetIndex !== -1) {
           activeCategory = initialCategory;
-          chartInstance.data.datasets.forEach((ds, index) => {
-            ds.hidden = index !== datasetIndex;
-          });
-          chartInstance.update();
           window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
           void loadTransactions(initialCategory);
           return;
