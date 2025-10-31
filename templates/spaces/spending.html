@@ -93,9 +93,29 @@
     let currentTransactions = [];
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
-    let chartMode = 'category';
-    const counterpartyColors = new Map();
-    let counterpartyColorIndex = 0;
+    let chartMode = 'default';
+    const colorCaches = {
+      counterparty: new Map(),
+      category: new Map(),
+    };
+    const colorIndices = {
+      counterparty: 0,
+      category: 0,
+    };
+    const STACK_CONFIG = {
+      category: {
+        mode: 'counterparty',
+        stack: 'counterparty-stack',
+        cacheKey: 'counterparty',
+        labelForTxn: (txn) => (txn.counterparty && txn.counterparty.trim()) || txn.spaceName || txn.source || 'Other',
+      },
+      counterparty: {
+        mode: 'category',
+        stack: 'category-stack',
+        cacheKey: 'category',
+        labelForTxn: (txn) => txn.category || 'Uncategorised',
+      },
+    };
     let selectedCategory = null;
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
@@ -151,7 +171,7 @@
       if (!chartInstance || !spendingSummary) {
         return;
       }
-      chartMode = 'category';
+      chartMode = 'default';
       chartInstance.data.labels = [...spendingSummary.dates];
       chartInstance.data.datasets = buildDefaultDatasets(spendingSummary.series);
       chartInstance.update();
@@ -164,10 +184,29 @@
       return `${year}-${month}-01`;
     }
 
-    function applyCounterpartyDatasets(transactions) {
+    function getColorFromCache(cacheKey, label) {
+      const cache = colorCaches[cacheKey];
+      if (!cache) {
+        return palette[0];
+      }
+      if (!cache.has(label)) {
+        const index = colorIndices[cacheKey] % palette.length;
+        cache.set(label, palette[index]);
+        colorIndices[cacheKey] += 1;
+      }
+      return cache.get(label);
+    }
+
+    function applyStackedDatasets(filterType, transactions) {
       if (!chartInstance || !spendingSummary) {
         return;
       }
+      const config = STACK_CONFIG[filterType];
+      if (!config) {
+        applyDefaultDatasets();
+        return;
+      }
+
       const monthLabels = new Set(spendingSummary.dates);
       const aggregates = new Map();
 
@@ -178,7 +217,7 @@
         }
         const monthKey = formatMonthKey(txn.transactionTime);
         monthLabels.add(monthKey);
-        const key = (txn.counterparty && txn.counterparty.trim()) || txn.spaceName || txn.source || 'Other';
+        const key = config.labelForTxn(txn);
         if (!aggregates.has(key)) {
           aggregates.set(key, { totals: new Map(), total: 0, currency: txn.currency || 'GBP' });
         }
@@ -195,22 +234,15 @@
 
       const datasets = Array.from(aggregates.entries())
         .sort((a, b) => b[1].total - a[1].total)
-        .map(([name, data]) => {
-          if (!counterpartyColors.has(name)) {
-            counterpartyColors.set(name, palette[counterpartyColorIndex % palette.length]);
-            counterpartyColorIndex += 1;
-          }
-          const color = counterpartyColors.get(name);
-          return {
-            label: name,
-            data: labels.map((label) => (data.totals.get(label) || 0) / 100),
-            backgroundColor: color,
-            stack: 'counterparty-stack',
-            currency: data.currency,
-          };
-        });
+        .map(([name, data]) => ({
+          label: name,
+          data: labels.map((label) => (data.totals.get(label) || 0) / 100),
+          backgroundColor: getColorFromCache(config.cacheKey, name),
+          stack: config.stack,
+          currency: data.currency,
+        }));
 
-      chartMode = 'counterparty';
+      chartMode = config.mode;
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
       chartInstance.update();
