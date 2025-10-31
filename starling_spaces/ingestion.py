@@ -6,8 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 from django.db import transaction
-from django.db.models import Count, F, Q, Sum
-from django.db.models.functions import TruncMonth, Upper
+from django.db.models import Count, F, Sum
 
 from starling_web.spaces.models import Category, FeedItem, SyncState
 
@@ -33,7 +32,7 @@ class FeedRecord:
     feed_item_uid: str
     account_uid: str
     category_uid: str
-    space_uid: str
+    space_uid: Optional[str]
     amount_minor_units: int
     currency: str
     direction: Optional[str]
@@ -250,6 +249,26 @@ def _sync_account_spaces(
     changes_since: Optional[str],
     max_pages: Optional[int],
 ) -> None:
+    default_category_uid = report.default_category
+    if default_category_uid:
+        default_name = report.account_name or "Account"
+        _upsert_category(
+            account_uid=report.account_uid,
+            category_uid=default_category_uid,
+            category_type="account",
+            name=default_name,
+            space_uid=None,
+        )
+        _sync_feed_category(
+            client,
+            report,
+            category_uid=default_category_uid,
+            space_uid=None,
+            space_name=default_name,
+            changes_since=changes_since,
+            max_pages=max_pages,
+        )
+
     for space in report.spaces:
         category_uid = _space_category_uid(space)
         _upsert_category(
@@ -259,11 +278,12 @@ def _sync_account_spaces(
             name=space.name,
             space_uid=space.uid,
         )
-        _sync_space_feed(
+        _sync_feed_category(
             client,
             report,
-            space,
-            category_uid,
+            category_uid=category_uid,
+            space_uid=space.uid,
+            space_name=space.name,
             changes_since=changes_since,
             max_pages=max_pages,
         )
@@ -301,11 +321,12 @@ def _upsert_category(
     )
 
 
-def _sync_space_feed(
+def _sync_feed_category(
     client: httpx.Client,
     report: AccountReport,
-    space: Space,
     category_uid: str,
+    space_uid: Optional[str],
+    space_name: Optional[str],
     *,
     changes_since: Optional[str],
     max_pages: Optional[int],
@@ -335,10 +356,10 @@ def _sync_space_feed(
                     raw_item,
                     account_uid=report.account_uid,
                     category_uid=category_uid,
-                    space_uid=space.uid,
+                    space_uid=space_uid,
                     currency_hint=report.currency,
                 )
-                classification = classify_for_storage(record, space.name)
+                classification = classify_for_storage(record, space_name)
                 _insert_feed_record(record, classification)
                 if record.spending_category:
                     _upsert_category(
@@ -371,7 +392,7 @@ def _parse_feed_record(
     *,
     account_uid: str,
     category_uid: str,
-    space_uid: str,
+    space_uid: Optional[str],
     currency_hint: Optional[str],
 ) -> FeedRecord:
     feed_item_uid = raw.get("feedItemUid")
@@ -488,4 +509,3 @@ def _title_case_category(value: str) -> str:
     if not value:
         return value
     return value.replace("_", " ").title()
-

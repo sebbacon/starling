@@ -96,6 +96,32 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
         "pageable": {"next": None},
     }
 
+    feed_response_default = {
+        "feedItems": [
+            {
+                "feedItemUid": "feed-card-1",
+                "categoryUid": "cat-123",
+                "transactionTime": "2024-11-09T08:15:00Z",
+                "amount": {"currency": "GBP", "minorUnits": 2500},
+                "direction": "OUT",
+                "source": "CARD",
+                "counterPartyName": "Local Grocer",
+                "spendingCategory": "DINING",
+            },
+            {
+                "feedItemUid": "feed-card-2",
+                "categoryUid": "cat-123",
+                "transactionTime": "2024-11-08T18:00:00Z",
+                "amount": {"currency": "GBP", "minorUnits": 1000},
+                "direction": "IN",
+                "source": "BANK_TRANSFER",
+                "counterPartyName": "Refund",
+                "spendingCategory": "REFUNDS",
+            },
+        ],
+        "pageable": {"next": None},
+    }
+
     respx_mock.get(
         "https://api.starlingbank.com/api/v2/feed/account/acc-123/category/space-1"
     ).respond(json=feed_response_space_1)
@@ -119,6 +145,10 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
         }
     )
 
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-123/category/cat-123"
+    ).respond(json=feed_response_default)
+
     sync_space_feeds("TOKEN")
 
     rows = list(
@@ -129,23 +159,20 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
             "spending_category",
             "classified_category",
             "classification_reason",
+            "space_uid",
         )
     )
-    assert [row["feed_item_uid"] for row in rows] == [
-        "feed-1",
-        "feed-2",
-        "feed-3",
-        "feed-4",
-    ]
-    assert rows[0]["amount_minor_units"] == -2000
-    assert rows[2]["amount_minor_units"] == 500
-    assert rows[0]["spending_category"] == "SHOPPING"
-    assert rows[3]["spending_category"] == "ENTERTAINMENT"
-    assert rows[0]["classified_category"] == "Shopping"
-    assert rows[0]["classification_reason"] == "starling_fallback"
+    feed_ids = {row["feed_item_uid"] for row in rows}
+    assert feed_ids == {"feed-1", "feed-2", "feed-3", "feed-4", "feed-card-1", "feed-card-2"}
+    card_row = next(row for row in rows if row["feed_item_uid"] == "feed-card-1")
+    assert card_row["amount_minor_units"] == -2500
+    assert card_row["spending_category"] == "DINING"
+    assert card_row["space_uid"] is None
 
     sync_state = SyncState.objects.get(account_uid="acc-123", category_uid="space-1")
     assert sync_state.last_transaction_time == "2024-11-10T10:00:00+00:00"
+    account_state = SyncState.objects.get(account_uid="acc-123", category_uid="cat-123")
+    assert account_state.last_transaction_time == "2024-11-09T08:15:00+00:00"
 
     categories = list(
         Category.objects.order_by("category_type", "category_uid").values(
@@ -155,14 +182,17 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
     assert [
         (row["category_type"], row["category_uid"]) for row in categories
     ] == [
+        ("account", "cat-123"),
         ("space", "space-1"),
         ("space", "space-2"),
+        ("spending", "DINING"),
         ("spending", "ENTERTAINMENT"),
         ("spending", "GROCERIES"),
+        ("spending", "REFUNDS"),
         ("spending", "SAVING"),
         ("spending", "SHOPPING"),
     ]
-    first_space = categories[0]
+    first_space = categories[1]
     assert first_space["space_uid"] == "space-1"
     assert first_space["name"] == "Rainy Day"
 
@@ -180,3 +210,4 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
     spending = {item["category"]: item for item in summary["spendingCategories"]}
     assert spending["SHOPPING"]["outflowCount"] == 1
     assert spending["ENTERTAINMENT"]["totalOutflowMinorUnits"] == 1000
+    assert spending["DINING"]["totalOutflowMinorUnits"] == 2500

@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from django.test import Client, override_settings
+from django.test import Client
 from django.urls import reverse
 
 

@@ -5,7 +5,7 @@ import pytest
 from django.core.management import CommandError, call_command
 
 from starling_spaces import reporting
-from starling_web.spaces.models import Category, FeedItem, SyncState
+from starling_web.spaces.models import Category, FeedItem
 
 
 def test_ingest_feeds_requires_token(monkeypatch):

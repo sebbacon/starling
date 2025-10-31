@@ -1,11 +1,9 @@
-import sqlite3
 
 import pytest
 import respx
 from httpx import Response
 
-from starling_spaces.reporting import (AccountReport, Money, Space,
-                                       StarlingAPIError, StarlingSchemaError,
+from starling_spaces.reporting import (AccountReport, StarlingAPIError, StarlingSchemaError,
                                        build_report_payload,
                                        fetch_spaces_configuration)
 

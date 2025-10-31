@@ -1,6 +1,4 @@
-from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from starling_spaces.classification import classify_transaction, reset_rules_cache
