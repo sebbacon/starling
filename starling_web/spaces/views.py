@@ -3,19 +3,94 @@ import math
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
+from django import forms
 from django.conf import settings
-from django.db.models import Q
-from django.http import JsonResponse
-from django.shortcuts import render
-from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.db.models import Q, Max
 from django.db.models.functions import Upper
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from starling_spaces.analytics import (
     calculate_spend_by_category,
     EXCLUDED_TRANSFER_SOURCES,
 )
-from starling_web.spaces.models import Category, FeedItem
+from starling_web.spaces.models import Category, ClassificationRule, FeedItem
+
+
+RULE_TYPE_CHOICES = [
+    ("counterparty_regex", "Counterparty matches regular expression"),
+    ("space_name_regex", "Space name matches regular expression"),
+    ("source_regex", "Transaction source matches regular expression"),
+    ("space", "Specific space UID"),
+    ("raw_path", "Value at JSON path matches"),
+    ("starling_category", "Starling spending category fallback"),
+    ("space_name", "Use space name as category"),
+]
+
+
+class ClassificationRuleForm(forms.ModelForm):
+    rule_type = forms.ChoiceField(choices=RULE_TYPE_CHOICES, label="Rule type")
+
+    class Meta:
+        model = ClassificationRule
+        fields = [
+            "position",
+            "rule_type",
+            "category",
+            "reason",
+            "pattern",
+            "space_uid",
+            "json_path",
+            "start_date",
+            "end_date",
+        ]
+        widgets = {
+            "reason": forms.TextInput(attrs={"placeholder": "Short label describing why this rule exists"}),
+            "pattern": forms.TextInput(attrs={"placeholder": "e.g. (?i)co-op"}),
+            "space_uid": forms.TextInput(attrs={"placeholder": "UUID from Starling space"}),
+            "json_path": forms.TextInput(attrs={"placeholder": "e.g. metadata.merchant.type"}),
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        start = cleaned.get("start_date")
+        end = cleaned.get("end_date")
+        if start and end and start > end:
+            raise forms.ValidationError("End date must be on or after the start date.")
+
+        rule_type = cleaned.get("rule_type")
+        category = cleaned.get("category")
+        pattern = cleaned.get("pattern")
+        space_uid = cleaned.get("space_uid")
+        json_path = cleaned.get("json_path")
+
+        if rule_type in {"counterparty_regex", "space_name_regex", "source_regex"}:
+            if not pattern:
+                self.add_error("pattern", "Provide a regular expression to match against.")
+            if not category:
+                self.add_error("category", "Select the category to apply when the pattern matches.")
+
+        if rule_type == "space":
+            if not space_uid:
+                self.add_error("space_uid", "Provide the Starling space UID to match.")
+            if not category:
+                self.add_error("category", "Select the category to apply when the space matches.")
+
+        if rule_type == "raw_path":
+            if not json_path:
+                self.add_error("json_path", "Provide the dot-separated JSON path to inspect.")
+            if not category:
+                self.add_error("category", "Select the category to apply when the JSON path has a value.")
+
+        if rule_type == "starling_category" and category:
+            # allow explicit override but ensure not empty string
+            cleaned["category"] = category.strip() or None
+
+        return cleaned
 
 
 @require_GET
@@ -183,6 +258,62 @@ def recategorise_transactions(request):
     )
 
     return JsonResponse({"updated": updated, "category": cleaned_category})
+
+
+@require_http_methods(["GET", "POST"])
+def manage_classification_rules(request):
+    rules = ClassificationRule.objects.order_by("position", "id")
+    selected_rule = None
+    selected_rule_id = request.GET.get("rule")
+    if selected_rule_id:
+        selected_rule = ClassificationRule.objects.filter(pk=selected_rule_id).first()
+
+    status = request.GET.get("status")
+    message = {
+        "created": "Classification rule created successfully.",
+        "updated": "Classification rule updated successfully.",
+        "deleted": "Classification rule deleted.",
+    }.get(status or "")
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        rule_id = request.POST.get("rule_id")
+
+        if action == "delete" and rule_id:
+            rule = get_object_or_404(ClassificationRule, pk=rule_id)
+            rule.delete()
+            return redirect(f"{reverse('spaces:classification-rules')}?status=deleted")
+
+        instance = None
+        if rule_id:
+            instance = get_object_or_404(ClassificationRule, pk=rule_id)
+            selected_rule = instance
+
+        form = ClassificationRuleForm(request.POST, instance=instance)
+        if form.is_valid():
+            rule = form.save(commit=False)
+            if rule.position is None:
+                max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
+                rule.position = max_position + 1
+            rule.save()
+            next_status = "updated" if instance else "created"
+            return redirect(f"{reverse('spaces:classification-rules')}?status={next_status}&rule={rule.pk}")
+    else:
+        initial = {}
+        max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
+        initial["position"] = max_position + 1
+        form = ClassificationRuleForm(initial=initial)
+        if selected_rule:
+            form = ClassificationRuleForm(instance=selected_rule)
+
+    context = {
+        "rules": rules,
+        "form": form,
+        "selected_rule": selected_rule,
+        "message": message,
+        "rule_type_guidance": RULE_TYPE_CHOICES,
+    }
+    return render(request, "spaces/classification_rules.html", context)
 
 
 def _parse_positive_int(value, default):

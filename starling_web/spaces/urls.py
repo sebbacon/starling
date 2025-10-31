@@ -17,4 +17,5 @@ urlpatterns = [
     path("spending/data/", views.spending_data, name="spending-data"),
     path("spending/transactions/", views.spending_transactions, name="spending-transactions"),
     path("spending/transactions/recategorise/", views.recategorise_transactions, name="spending-recategorise"),
+    path("rules/", views.manage_classification_rules, name="classification-rules"),
 ]

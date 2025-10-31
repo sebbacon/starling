@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Classification Rules{% endblock %}
+
+{% block content %}
+  <section class="card rule-card">
+    <h1>Classification Rules</h1>
+    <p>
+      Rules are evaluated in ascending <strong>position</strong>. The first rule that matches a transaction wins,
+      followed by the built-in Starling and space-name fallbacks. Use these controls to create or edit rules and
+      constrain them to specific reporting windows when necessary.
+    </p>
+    {% if message %}
+      <p class="notice">{{ message }}</p>
+    {% endif %}
+
+    <div class="rule-grid">
+      <section class="rule-form">
+        <h2>{% if selected_rule %}Edit rule #{{ selected_rule.position }}{% else %}Add a rule{% endif %}</h2>
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if selected_rule %}
+            <input type="hidden" name="rule_id" value="{{ selected_rule.id }}" />
+          {% endif %}
+          <div class="form-fields">
+            {% for field in form %}
+              <div class="field">
+                <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}*{% endif %}</label>
+                {{ field }}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<p class="error">{{ error }}</p>{% endfor %}
+              </div>
+            {% endfor %}
+            {% if form.non_field_errors %}
+              {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+            {% endif %}
+          </div>
+          <button type="submit" class="primary">{% if selected_rule %}Update rule{% else %}Create rule{% endif %}</button>
+          {% if selected_rule %}
+            <button type="submit" name="action" value="delete" class="danger" formnovalidate>Delete rule</button>
+          {% endif %}
+        </form>
+      </section>
+
+      <section class="rule-guidance">
+        <h2>Rule types</h2>
+        <ul>
+          {% for key, description in rule_type_guidance %}
+            <li><strong>{{ key }}</strong> – {{ description }}</li>
+          {% endfor %}
+        </ul>
+        <p class="tip">
+          Regex-based rules use Python regular expressions. Prefix with <code>(?i)</code> to ignore case. For JSON
+          path rules, use dot-separated keys such as <code>metadata.merchant.type</code> – the rule fires when that
+          path exists and has a truthy value.
+        </p>
+        <p class="tip">
+          Date ranges are optional. When provided, the rule applies only to transactions whose timestamp falls within
+          the inclusive window.
+        </p>
+      </section>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Existing rules</h2>
+    {% if rules %}
+      <div class="table-wrapper">
+        <table class="rule-table">
+          <thead>
+            <tr>
+              <th>Position</th>
+              <th>Type</th>
+              <th>Reason</th>
+              <th>Category</th>
+              <th>Pattern / Space / Path</th>
+              <th>Dates</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rule in rules %}
+              <tr{% if selected_rule and rule.id == selected_rule.id %} class="active"{% endif %}>
+                <td>{{ rule.position }}</td>
+                <td>{{ rule.rule_type }}</td>
+                <td>{{ rule.reason|default:"—" }}</td>
+                <td>{{ rule.category|default:"—" }}</td>
+                <td>
+                  {% if rule.pattern %}{{ rule.pattern }}{% elif rule.space_uid %}{{ rule.space_uid }}{% elif rule.json_path %}{{ rule.json_path }}{% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if rule.start_date or rule.end_date %}
+                    {{ rule.start_date|default:"…" }} → {{ rule.end_date|default:"…" }}
+                  {% else %}
+                    Always on
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  <a class="link" href="{% url 'spaces:classification-rules' %}?rule={{ rule.id }}">Edit</a>
+                  <form method="post" action="{% url 'spaces:classification-rules' %}?rule={{ rule.id }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="rule_id" value="{{ rule.id }}" />
+                    <button type="submit" name="action" value="delete" class="link danger" formnovalidate>Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>No custom rules defined yet. Use the form above to create one.</p>
+    {% endif %}
+  </section>
+
+  <style>
+    .rule-card .notice {
+      background: rgba(52, 211, 153, 0.15);
+      border: 1px solid rgba(52, 211, 153, 0.6);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin: 0.75rem 0 1.5rem;
+      color: #d1fae5;
+    }
+    .rule-grid {
+      display: grid;
+      gap: 1.5rem;
+    }
+    @media (min-width: 960px) {
+      .rule-grid {
+        grid-template-columns: 2fr 1fr;
+        align-items: start;
+      }
+    }
+    .rule-form form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .rule-form .form-fields {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .rule-form .field label {
+      font-weight: 600;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .rule-form .field input,
+    .rule-form .field select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #2f3c52;
+      background: rgba(31, 41, 55, 0.85);
+      color: #e5e7eb;
+    }
+    .rule-form .field small {
+      display: block;
+      margin-top: 0.2rem;
+      color: #9ca3af;
+    }
+    .rule-form .error {
+      color: #fca5a5;
+      margin: 0.25rem 0 0;
+    }
+    .rule-form .primary {
+      align-self: flex-start;
+      background: #34d399;
+      color: #101215;
+      border: none;
+      padding: 0.45rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .rule-form .danger {
+      background: transparent;
+      border: 1px solid rgba(248, 113, 113, 0.7);
+      color: #fca5a5;
+      padding: 0.4rem 0.9rem;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .rule-guidance ul {
+      margin: 0;
+      padding-left: 1.2rem;
+      display: grid;
+      gap: 0.5rem;
+    }
+    .rule-guidance .tip {
+      margin-top: 0.75rem;
+      color: #cbd5f5;
+    }
+    .rule-guidance code {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+    .rule-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .rule-table th,
+    .rule-table td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      text-align: left;
+    }
+    .rule-table tr.active {
+      background: rgba(52, 211, 153, 0.12);
+    }
+    .rule-table .actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .rule-table .actions form {
+      margin: 0;
+    }
+    .rule-table .link {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .rule-table .danger {
+      color: #fca5a5;
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+  </style>
+{% endblock %}
