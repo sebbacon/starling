@@ -67,7 +67,6 @@
           <th scope="col" data-sort-key="spaceName" aria-sort="none">Space</th>
           <th scope="col" data-sort-key="source" aria-sort="none">Source</th>
           <th scope="col" class="numeric" data-sort-key="amountMinorUnits" aria-sort="none">Amount</th>
-          <th scope="col">Raw</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -88,8 +87,6 @@
     let currentTransactions = [];
     let currentTransactionsMessage = null;
     const sortState = { column: 'transactionTime', direction: 'desc' };
-    let previewOpen = false;
-    let previewCleanup = null;
 
     async function loadSpendingData() {
       const response = await fetch("{% url 'spaces:spending-data' %}?days={{ summary_days }}");
@@ -150,7 +147,7 @@
       if (currentTransactionsMessage) {
         const row = document.createElement('tr');
         const cell = document.createElement('td');
-        cell.colSpan = 7;
+        cell.colSpan = 6;
         cell.textContent = currentTransactionsMessage;
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -161,7 +158,7 @@
       if (!currentTransactions.length) {
         const row = document.createElement('tr');
         const cell = document.createElement('td');
-        cell.colSpan = 7;
+        cell.colSpan = 6;
         cell.textContent = 'No transactions recorded for this category in the selected window.';
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -202,18 +199,6 @@
         const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
         amountCell.textContent = formatter.format((txn.amountMinorUnits || 0) / 100);
         row.appendChild(amountCell);
-
-        const rawCell = document.createElement('td');
-        rawCell.classList.add('action-cell');
-        const rawButton = document.createElement('button');
-        rawButton.type = 'button';
-        rawButton.textContent = 'View raw';
-        rawButton.addEventListener('click', (event) => {
-          event.stopPropagation();
-          showRawPopover(rawButton, txn);
-        });
-        rawCell.appendChild(rawButton);
-        row.appendChild(rawCell);
 
         tbody.appendChild(row);
       });
@@ -381,101 +366,6 @@
     }
 
     
-    function closeRawPopover() {
-      if (previewCleanup) {
-        previewCleanup();
-        previewCleanup = null;
-      }
-      previewOpen = false;
-    }
-
-    function showRawPopover(anchor, txn) {
-      closeRawPopover();
-      previewOpen = true;
-
-      const existing = document.getElementById('raw-popover');
-      if (existing) {
-        existing.remove();
-      }
-
-      const popover = document.createElement('div');
-      popover.id = 'raw-popover';
-      popover.style.position = 'absolute';
-      popover.style.zIndex = '1000';
-      popover.style.maxWidth = '420px';
-      popover.style.padding = '1rem';
-      popover.style.background = '#172036';
-      popover.style.color = '#f8faff';
-      popover.style.borderRadius = '8px';
-      popover.style.boxShadow = '0 12px 28px rgba(15, 23, 42, 0.28)';
-      popover.style.fontSize = '0.9rem';
-      popover.style.lineHeight = '1.4';
-      popover.style.maxHeight = '420px';
-      popover.style.overflow = 'auto';
-
-      const rawPre = document.createElement('pre');
-      const payload = {
-        feedItemUid: txn.feedItemUid,
-        category: txn.category,
-        spaceUid: txn.spaceUid,
-        spaceName: txn.spaceName || null,
-        source: txn.source,
-        counterparty: txn.counterparty,
-        classificationReason: txn.classificationReason || null,
-        raw: txn.raw || {},
-      };
-      rawPre.textContent = JSON.stringify(payload, null, 2);
-      rawPre.style.whiteSpace = 'pre-wrap';
-      rawPre.style.wordBreak = 'break-word';
-      rawPre.style.margin = '0';
-      rawPre.style.fontSize = '0.85rem';
-      popover.appendChild(rawPre);
-
-      document.body.appendChild(popover);
-
-      const anchorRect = anchor.getBoundingClientRect();
-      const popRect = popover.getBoundingClientRect();
-      const top = window.scrollY + anchorRect.bottom + 12;
-      const left = window.scrollX + anchorRect.left - popRect.width - 12;
-      const adjustedTop = Math.max(window.scrollY + 16, Math.min(top, window.scrollY + window.innerHeight - popRect.height - 16));
-      const adjustedLeft = Math.max(window.scrollX + 16, Math.min(left, window.scrollX + window.innerWidth - popRect.width - 16));
-      popover.style.top = `${adjustedTop}px`;
-      popover.style.left = `${adjustedLeft}px`;
-
-      const handleOutsideClick = (event) => {
-        if (!popover.contains(event.target) && event.target !== anchor) {
-          closeRawPopover();
-        }
-      };
-
-      const handleEscape = (event) => {
-        if (event.key === 'Escape') {
-          closeRawPopover();
-        }
-      };
-
-      document.addEventListener('click', handleOutsideClick, { capture: true });
-      document.addEventListener('keydown', handleEscape);
-
-      previewCleanup = () => {
-        document.removeEventListener('click', handleOutsideClick, { capture: true });
-        document.removeEventListener('keydown', handleEscape);
-        popover.remove();
-      };
-    }
-
-    window.addEventListener('scroll', () => {
-      if (previewOpen) {
-        closeRawPopover();
-      }
-    });
-
-    window.addEventListener('resize', () => {
-      if (previewOpen) {
-        closeRawPopover();
-      }
-    });
-
     document.addEventListener('DOMContentLoaded', renderChart);
   </script>
 {% endblock %}
