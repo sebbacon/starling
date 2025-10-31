@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,10 @@ def classify_transaction(transaction: Dict[str, Any]) -> Classification:
 def _apply_rule(rule: Dict[str, Any], tx: Dict[str, Any]) -> Optional[Classification]:
     rule_type = rule.get("type")
     reason = rule.get("reason", rule_type or "rule")
+
+    tx_time = tx.get("transaction_time")
+    if not _rule_active_for_timestamp(rule, tx_time):
+        return None
 
     if rule_type == "space":
         space_uid = rule.get("space_uid")
@@ -130,6 +135,10 @@ def _load_rules_from_db() -> Optional[List[Dict[str, Any]]]:
             entry["space_uid"] = record.space_uid
         if record.json_path:
             entry["path"] = record.json_path
+        if record.start_date:
+            entry["start_date"] = record.start_date
+        if record.end_date:
+            entry["end_date"] = record.end_date
         rules.append(entry)
     return rules
 
@@ -149,6 +158,7 @@ def classify_for_storage(record, space_name: Optional[str]) -> Classification:
         "amount_minor_units": getattr(record, "amount_minor_units", None),
         "direction": getattr(record, "direction", None),
         "raw": getattr(record, "raw", None),
+        "transaction_time": getattr(record, "transaction_time", None),
     }
     return classify_transaction(transaction)
 
@@ -156,3 +166,31 @@ def classify_for_storage(record, space_name: Optional[str]) -> Classification:
 def reset_rules_cache() -> None:
     _load_rules.cache_clear()
     _load_configured_rules.cache_clear()
+
+
+def _rule_active_for_timestamp(rule: Dict[str, Any], timestamp: Any) -> bool:
+    start_date = rule.get("start_date")
+    end_date = rule.get("end_date")
+    if not start_date and not end_date:
+        return True
+    if timestamp is None:
+        return True
+    if isinstance(timestamp, str):
+        try:
+            parsed = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return True
+    elif isinstance(timestamp, datetime):
+        parsed = timestamp
+    else:
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    tx_date = parsed.date()
+    if start_date and tx_date < start_date:
+        return False
+    if end_date and tx_date > end_date:
+        return False
+    return True

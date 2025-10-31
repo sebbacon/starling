@@ -26,6 +26,8 @@ class ClassificationRule(models.Model):
     pattern = models.CharField(max_length=255, blank=True, null=True)
     space_uid = models.CharField(max_length=64, blank=True, null=True)
     json_path = models.CharField(max_length=255, blank=True, null=True)
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
 
     class Meta:
         ordering = ("position", "id")

@@ -34,7 +34,16 @@ class SyncStateAdmin(admin.ModelAdmin):
 
 @admin.register(ClassificationRule)
 class ClassificationRuleAdmin(admin.ModelAdmin):
-    list_display = ("position", "rule_type", "category", "reason", "pattern", "space_uid", "json_path")
+    list_display = (
+        "position",
+        "rule_type",
+        "category",
+        "reason",
+        "pattern",
+        "space_uid",
+        "start_date",
+        "end_date",
+    )
     list_filter = ("rule_type",)
     search_fields = ("category", "reason", "pattern", "space_uid")
     ordering = ("position", "id")
