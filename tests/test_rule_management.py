@@ -4,7 +4,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from starling_web.spaces.models import ClassificationRule, FeedItem
+from starling_web.spaces.models import Category, ClassificationRule, FeedItem
 
 
 pytestmark = pytest.mark.django_db
@@ -13,6 +13,28 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def clear_default_rules():
     ClassificationRule.objects.all().delete()
+
+
+@pytest.fixture(autouse=True)
+def seed_categories(db):
+    Category.objects.get_or_create(
+        account_uid="acc-cat",
+        category_type="spending",
+        category_uid="cat-mortgage",
+        defaults={"name": "Mortgage"},
+    )
+    Category.objects.get_or_create(
+        account_uid="acc-cat",
+        category_type="spending",
+        category_uid="cat-holidays",
+        defaults={"name": "Holidays"},
+    )
+    Category.objects.get_or_create(
+        account_uid="acc-cat",
+        category_type="spending",
+        category_uid="cat-food",
+        defaults={"name": "Food"},
+    )
 
 
 @pytest.fixture

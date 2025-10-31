@@ -49,11 +49,29 @@ class ClassificationRuleForm(forms.ModelForm):
         widgets = {
             "reason": forms.TextInput(attrs={"placeholder": "Short label describing why this rule exists"}),
             "pattern": forms.TextInput(attrs={"placeholder": "e.g. (?i)co-op"}),
-            "space_uid": forms.TextInput(attrs={"placeholder": "UUID from Starling space"}),
-            "json_path": forms.TextInput(attrs={"placeholder": "e.g. metadata.merchant.type"}),
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
         }
+
+    def __init__(self, *args, category_choices=None, **kwargs):
+        self.category_choices = category_choices or []
+        super().__init__(*args, **kwargs)
+        choices = [("", "Select a category")]
+        for name in sorted(set(self.category_choices)):
+            choices.append((name, name))
+        current = None
+        if self.is_bound:
+            current = self.data.get("category")
+        else:
+            current = self.initial.get("category") or getattr(self.instance, "category", None)
+        if current and current not in [value for value, _ in choices]:
+            choices.append((current, current))
+        self.fields["category"] = forms.ChoiceField(
+            choices=choices,
+            required=False,
+            label="Category",
+        )
+        self.fields["category"].initial = current or ""
 
     def clean(self):
         cleaned = super().clean()
@@ -67,6 +85,10 @@ class ClassificationRuleForm(forms.ModelForm):
         pattern = cleaned.get("pattern")
         space_uid = cleaned.get("space_uid")
         json_path = cleaned.get("json_path")
+
+        if category == "":
+            category = None
+            cleaned["category"] = None
 
         if rule_type in {"counterparty_regex", "space_name_regex", "source_regex"}:
             if not pattern:
@@ -263,6 +285,16 @@ def recategorise_transactions(request):
 @require_http_methods(["GET", "POST"])
 def manage_classification_rules(request):
     rules = ClassificationRule.objects.order_by("position", "id")
+    category_options_query = (
+        Category.objects.filter(category_type="spending")
+        .exclude(name__isnull=True)
+        .exclude(name="")
+        .values_list("name", flat=True)
+        .distinct()
+    )
+    category_options = list(category_options_query)
+    if "Uncategorised" not in category_options:
+        category_options.append("Uncategorised")
     selected_rule = None
     selected_rule_id = request.GET.get("rule")
     if selected_rule_id:
@@ -289,7 +321,7 @@ def manage_classification_rules(request):
             instance = get_object_or_404(ClassificationRule, pk=rule_id)
             selected_rule = instance
 
-        form = ClassificationRuleForm(request.POST, instance=instance)
+        form = ClassificationRuleForm(request.POST, instance=instance, category_choices=category_options)
         if form.is_valid():
             rule = form.save(commit=False)
             if rule.position is None:
@@ -302,9 +334,9 @@ def manage_classification_rules(request):
         initial = {}
         max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
         initial["position"] = max_position + 1
-        form = ClassificationRuleForm(initial=initial)
+        form = ClassificationRuleForm(initial=initial, category_choices=category_options)
         if selected_rule:
-            form = ClassificationRuleForm(instance=selected_rule)
+            form = ClassificationRuleForm(instance=selected_rule, category_choices=category_options)
 
     context = {
         "rules": rules,
@@ -312,6 +344,7 @@ def manage_classification_rules(request):
         "selected_rule": selected_rule,
         "message": message,
         "rule_type_guidance": RULE_TYPE_CHOICES,
+        "category_choices": sorted(set(category_options)),
     }
     return render(request, "spaces/classification_rules.html", context)
 
