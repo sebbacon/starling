@@ -16,4 +16,5 @@ urlpatterns = [
     path("spending/counterparty/<str:counterparty_name>/", views.spending, name="spending-counterparty"),
     path("spending/data/", views.spending_data, name="spending-data"),
     path("spending/transactions/", views.spending_transactions, name="spending-transactions"),
+    path("spending/transactions/recategorise/", views.recategorise_transactions, name="spending-recategorise"),
 ]

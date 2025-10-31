@@ -313,6 +313,28 @@ def test_spending_transactions_accepts_date_range(settings):
     assert payload["end"].startswith("2024-12-01")
 
 
+def test_spending_transactions_recategorise_updates(settings):
+    _seed_transactions()
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(
+        reverse("spaces:spending-recategorise"),
+        data=json.dumps(
+            {
+                "feedItemUids": ["item-main"],
+                "category": "Shopping",
+            }
+        ),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["updated"] == 1
+
+    item = FeedItem.objects.get(feed_item_uid="item-main")
+    assert item.classified_category == "Shopping"
+    assert item.classification_reason == "manual"
+
+
 def test_spending_transactions_requires_filter():
     client = Client()
     response = client.get(reverse("spaces:spending-transactions"))

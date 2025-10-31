@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta, timezone
+import json
 import math
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 from django.db.models.functions import Upper
 
 from starling_spaces.analytics import (
@@ -27,6 +28,18 @@ def spending(request, category_name=None, counterparty_name=None):
 
     search_query = (request.GET.get("search") or "").strip()
 
+    category_options_query = (
+        Category.objects.filter(category_type="spending")
+        .exclude(name__isnull=True)
+        .exclude(name="")
+        .order_by("name")
+        .values_list("name", flat=True)
+        .distinct()
+    )
+    category_options = list(category_options_query)
+    if "Uncategorised" not in category_options:
+        category_options.append("Uncategorised")
+
     counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
@@ -40,6 +53,7 @@ def spending(request, category_name=None, counterparty_name=None):
             "initial_search": search_query,
             "base_spending_url": reverse("spaces:spending"),
             "counterparty_base_url": counterparty_base,
+            "category_options": category_options,
         },
     )
 
@@ -142,6 +156,33 @@ def spending_transactions(request):
     if search:
         response["search"] = search
     return JsonResponse(response)
+
+
+@require_POST
+def recategorise_transactions(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except (TypeError, json.JSONDecodeError):
+        return JsonResponse({"error": "invalid json payload"}, status=400)
+
+    feed_ids = payload.get("feedItemUids")
+    category = payload.get("category")
+    if not isinstance(feed_ids, list) or not feed_ids:
+        return JsonResponse({"error": "feedItemUids is required"}, status=400)
+    if not isinstance(category, str) or not category.strip():
+        return JsonResponse({"error": "category is required"}, status=400)
+
+    cleaned_category = category.strip()
+    valid_ids = {uid.strip() for uid in feed_ids if isinstance(uid, str) and uid.strip()}
+    if not valid_ids:
+        return JsonResponse({"error": "no valid feedItemUids provided"}, status=400)
+
+    updated = FeedItem.objects.filter(feed_item_uid__in=valid_ids).update(
+        classified_category=cleaned_category,
+        classification_reason="manual",
+    )
+
+    return JsonResponse({"updated": updated, "category": cleaned_category})
 
 
 def _parse_positive_int(value, default):
