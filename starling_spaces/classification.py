@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
-
-
-RULES_ENV_VAR = "STARLING_CLASSIFICATION_RULES"
-DEFAULT_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "classification_rules.yaml"
-
+try:  # pragma: no cover - django only available in app context
+    from django.apps import apps
+    from django.db.utils import OperationalError, ProgrammingError
+except ImportError:  # pragma: no cover - fallback for non-django usage
+    apps = None  # type: ignore
+    OperationalError = ProgrammingError = RuntimeError  # type: ignore
 
 @dataclass(frozen=True)
 class Classification:
@@ -99,25 +97,41 @@ def _load_rules() -> List[Dict[str, Any]]:
 
 @lru_cache(maxsize=1)
 def _load_configured_rules() -> List[Dict[str, Any]]:
-    path = Path(os.getenv(RULES_ENV_VAR) or DEFAULT_RULES_PATH)
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    rules = data.get("rules")
-    if not rules:
-        return []
-    validated: List[Dict[str, Any]] = []
-    for entry in rules:
-        if not isinstance(entry, dict):
-            continue
-        rule_type = entry.get("type")
-        if rule_type in {"starling_category", "space_name"}:
-            # allow but optional category override
-            validated.append(entry)
-        elif rule_type in {"space", "space_name_regex", "counterparty_regex", "source_regex", "raw_path"}:
-            validated.append(entry)
-    return validated
+    rules_from_db = _load_rules_from_db()
+    if rules_from_db is not None:
+        return rules_from_db
+    return []
+
+
+def _load_rules_from_db() -> Optional[List[Dict[str, Any]]]:
+    if apps is None or not apps.ready:
+        return None
+    try:
+        rule_model = apps.get_model("spaces", "ClassificationRule")
+    except LookupError:
+        return None
+    if rule_model is None:
+        return None
+    try:
+        records = list(rule_model.objects.order_by("position", "id"))
+    except (OperationalError, ProgrammingError):
+        return None
+
+    rules: List[Dict[str, Any]] = []
+    for record in records:
+        entry: Dict[str, Any] = {"type": record.rule_type}
+        if record.category:
+            entry["category"] = record.category
+        if record.reason:
+            entry["reason"] = record.reason
+        if record.pattern:
+            entry["pattern"] = record.pattern
+        if record.space_uid:
+            entry["space_uid"] = record.space_uid
+        if record.json_path:
+            entry["path"] = record.json_path
+        rules.append(entry)
+    return rules
 
 
 def _format_category(value: str) -> str:

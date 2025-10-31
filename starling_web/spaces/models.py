@@ -18,6 +18,23 @@ class Category(models.Model):
         return self.name or f"{self.category_type}:{self.category_uid}"
 
 
+class ClassificationRule(models.Model):
+    position = models.PositiveIntegerField(unique=True)
+    rule_type = models.CharField(max_length=32)
+    category = models.CharField(max_length=255, blank=True, null=True)
+    reason = models.CharField(max_length=128, blank=True, null=True)
+    pattern = models.CharField(max_length=255, blank=True, null=True)
+    space_uid = models.CharField(max_length=64, blank=True, null=True)
+    json_path = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        ordering = ("position", "id")
+
+    def __str__(self):
+        label = self.reason or self.rule_type
+        return f"{self.position}: {label}"
+
+
 class FeedItem(models.Model):
     feed_item_uid = models.CharField(primary_key=True, max_length=64)
     account_uid = models.CharField(max_length=64)

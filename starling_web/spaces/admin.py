@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, FeedItem, SyncState
+from .models import Category, ClassificationRule, FeedItem, SyncState
 
 
 @admin.register(Category)
@@ -31,4 +31,10 @@ class SyncStateAdmin(admin.ModelAdmin):
     list_display = ("account_uid", "category_uid", "last_transaction_time")
     search_fields = ("account_uid", "category_uid")
 
-# Register your models here.
+
+@admin.register(ClassificationRule)
+class ClassificationRuleAdmin(admin.ModelAdmin):
+    list_display = ("position", "rule_type", "category", "reason", "pattern", "space_uid", "json_path")
+    list_filter = ("rule_type",)
+    search_fields = ("category", "reason", "pattern", "space_uid")
+    ordering = ("position", "id")

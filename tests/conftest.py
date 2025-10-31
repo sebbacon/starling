@@ -9,10 +9,6 @@ os.environ.setdefault("DJANGO_DEBUG", "1")
 os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "localhost,testserver")
 os.environ.setdefault("DJANGO_DATABASE_PATH", str(BASE_DIR / "test_django.sqlite3"))
 os.environ.setdefault("STARLING_SUMMARY_DAYS", "30")
-os.environ.setdefault(
-    "STARLING_CLASSIFICATION_RULES",
-    str(BASE_DIR / "config" / "classification_rules.yaml"),
-)
 
 import django
 django.setup()

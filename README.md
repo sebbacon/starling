@@ -39,7 +39,7 @@ Visit `http://localhost:8000/` to view the summary. The homepage uses htmx to re
 
 Navigate to `http://localhost:8000/spending/` for a stacked spending chart grouped by preferred categories (spaces first, falling back to transaction categories). By default this view shows the last 12 months of activity; append `?days=180` (or similar) to compare different windows.
 
-Classification rules live in `config/classification_rules.yaml` and are evaluated in order. Add overrides for specific spaces or counterparties to sit ahead of Starling’s fallback category.
+Classification rules now live in the database (`ClassificationRule` entries) and are evaluated in ascending `position`. A default set ships with the migration; ongoing tweaks should happen through the admin UI so they apply immediately.
 
 ### Management commands
 

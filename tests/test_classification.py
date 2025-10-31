@@ -2,30 +2,54 @@
 import pytest
 
 from starling_spaces import classification
+from starling_web.spaces.models import ClassificationRule
+
+
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def clear_rule_cache():
+def manage_rules():
+    existing = list(
+        ClassificationRule.objects.order_by("position", "id").values(
+            "position",
+            "rule_type",
+            "category",
+            "reason",
+            "pattern",
+            "space_uid",
+            "json_path",
+        )
+    )
+    ClassificationRule.objects.all().delete()
     classification.reset_rules_cache()
     yield
+    ClassificationRule.objects.all().delete()
+    if existing:
+        ClassificationRule.objects.bulk_create(
+            ClassificationRule(**record) for record in existing
+        )
     classification.reset_rules_cache()
 
 
-def test_classification_respects_rule_order(tmp_path, monkeypatch):
-    rules_path = tmp_path / "rules.yaml"
-    rules_path.write_text(
-        """
-rules:
-  - type: counterparty_regex
-    pattern: "(?i)mortgage"
-    category: "Mortgage"
-    reason: "counterparty"
-  - type: starling_category
-    reason: "starling"
-""",
-        encoding="utf-8",
+def test_classification_respects_rule_order():
+    ClassificationRule.objects.bulk_create(
+        [
+            ClassificationRule(
+                position=0,
+                rule_type="counterparty_regex",
+                category="Mortgage",
+                reason="counterparty",
+                pattern="(?i)mortgage",
+            ),
+            ClassificationRule(
+                position=1,
+                rule_type="starling_category",
+                reason="starling",
+            ),
+        ]
     )
-    monkeypatch.setenv(classification.RULES_ENV_VAR, str(rules_path))
+    classification.reset_rules_cache()
 
     result = classification.classify_transaction(
         {
@@ -38,10 +62,8 @@ rules:
     assert result.reason == "counterparty"
 
 
-def test_classification_falls_back_to_starling(tmp_path, monkeypatch):
-    rules_path = tmp_path / "rules.yaml"
-    rules_path.write_text("rules: []\n", encoding="utf-8")
-    monkeypatch.setenv(classification.RULES_ENV_VAR, str(rules_path))
+def test_classification_falls_back_to_starling():
+    classification.reset_rules_cache()
 
     result = classification.classify_transaction(
         {
@@ -54,10 +76,8 @@ def test_classification_falls_back_to_starling(tmp_path, monkeypatch):
     assert result.reason == "starling_fallback"
 
 
-def test_classification_falls_back_to_space_name(tmp_path, monkeypatch):
-    rules_path = tmp_path / "rules.yaml"
-    rules_path.write_text("rules: []\n", encoding="utf-8")
-    monkeypatch.setenv(classification.RULES_ENV_VAR, str(rules_path))
+def test_classification_falls_back_to_space_name():
+    classification.reset_rules_cache()
 
     result = classification.classify_transaction(
         {

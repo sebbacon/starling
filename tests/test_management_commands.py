@@ -5,7 +5,7 @@ import pytest
 from django.core.management import CommandError, call_command
 
 from starling_spaces import reporting
-from starling_web.spaces.models import Category, FeedItem
+from starling_web.spaces.models import Category, ClassificationRule, FeedItem
 
 
 def test_ingest_feeds_requires_token(monkeypatch):
@@ -197,21 +197,19 @@ def test_reclassify_transactions_updates(tmp_path, monkeypatch):
         raw_json={},
     )
 
-    rules_path = tmp_path / "rules.yaml"
-    rules_path.write_text(
-        """
-rules:
-  - type: counterparty_regex
-    pattern: "(?i)mortgage"
-    category: "Mortgage"
-    reason: "counterparty"
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("STARLING_CLASSIFICATION_RULES", str(rules_path))
-
     from starling_spaces import classification
 
+    ClassificationRule.objects.update_or_create(
+        position=0,
+        defaults={
+            "rule_type": "counterparty_regex",
+            "category": "Mortgage",
+            "reason": "counterparty",
+            "pattern": "(?i)mortgage",
+            "space_uid": None,
+            "json_path": None,
+        },
+    )
     classification.reset_rules_cache()
 
     call_command("reclassify_transactions")
@@ -279,4 +277,3 @@ def test_report_spaces_wraps_errors(monkeypatch):
         call_command("report_spaces")
 
     assert "boom" in str(excinfo.value)
-
