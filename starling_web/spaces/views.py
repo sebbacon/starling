@@ -2,6 +2,7 @@ import json
 import math
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+import io
 
 from django import forms
 from django.conf import settings
@@ -11,6 +12,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
+from django.core.management import call_command
 
 from starling_spaces.analytics import (
     calculate_spend_by_category,
@@ -394,6 +396,8 @@ def manage_classification_rules(request):
         "created": "Classification rule created successfully.",
         "updated": "Classification rule updated successfully.",
         "deleted": "Classification rule deleted.",
+        "applied": "Rules applied to existing transactions.",
+        "apply-error": "Failed to apply rules. Check server logs for details.",
     }.get(status or "")
 
     if request.method == "POST":
@@ -458,6 +462,15 @@ def manage_classification_rules(request):
     }
     return render(request, "spaces/classification_rules.html", context)
 
+
+@require_POST
+def apply_classification_rules(request):
+    buffer = io.StringIO()
+    try:
+        call_command("reclassify_transactions", stdout=buffer, stderr=buffer)
+    except Exception:  # pragma: no cover - surface error message
+        return redirect(f"{reverse('spaces:classification-rules')}?status=apply-error")
+    return redirect(f"{reverse('spaces:classification-rules')}?status=applied")
 
 def _parse_positive_int(value, default):
     if not value:

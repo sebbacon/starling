@@ -4,12 +4,20 @@
 
 {% block content %}
   <section class="card rule-card">
-    <h1>Classification Rules</h1>
-    <p>
-      Rules are evaluated in ascending <strong>position</strong>. The first rule that matches a transaction wins,
-      followed by the built-in Starling and space-name fallbacks. Use these controls to create or edit rules and
-      constrain them to specific reporting windows when necessary.
-    </p>
+    <div class="rule-card__header">
+      <div>
+        <h1>Classification Rules</h1>
+        <p>
+          Rules are evaluated in ascending <strong>position</strong>. The first rule that matches a transaction wins,
+          followed by the built-in Starling and space-name fallbacks. Use these controls to create or edit rules and
+          constrain them to specific reporting windows when necessary.
+        </p>
+      </div>
+      <form method="post" action="{% url 'spaces:classification-rules-apply' %}" class="apply-form">
+        {% csrf_token %}
+        <button type="submit" class="apply-button" title="Re-run rules over stored transactions">Apply rules</button>
+      </form>
+    </div>
     {% if message %}
       <p class="notice">{{ message }}</p>
     {% endif %}
@@ -121,6 +129,29 @@
       border-radius: 8px;
       margin: 0.75rem 0 1.5rem;
       color: #d1fae5;
+    }
+    .rule-card__header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1.5rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .apply-form {
+      margin-left: auto;
+    }
+    .apply-button {
+      background: linear-gradient(135deg, #34d399, #10b981);
+      border: none;
+      color: #0f172a;
+      font-weight: 600;
+      padding: 0.45rem 1.1rem;
+      border-radius: 999px;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(16, 185, 129, 0.25);
+    }
+    .apply-button:hover {
+      filter: brightness(1.05);
     }
     .rule-grid {
       display: grid;

@@ -173,3 +173,17 @@ def test_manage_rules_prefills_from_query():
     form = response.context["form"]
     assert form.initial.get("pattern") == "VetSuccess"
     assert form.initial.get("rule_type") == "counterparty_regex"
+
+
+def test_apply_rules_triggers_command(monkeypatch):
+    calls = []
+
+    def fake_call_command(name, *args, **kwargs):
+        calls.append(name)
+
+    monkeypatch.setattr("starling_web.spaces.views.call_command", fake_call_command)
+
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(reverse("spaces:classification-rules-apply"))
+    assert response.status_code == 302
+    assert calls == ["reclassify_transactions"]
