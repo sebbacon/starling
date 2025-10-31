@@ -376,8 +376,8 @@
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
         renderTransactionsTable();
-        if (prepared.type === 'category') {
-          applyStackedDatasets(currentFilter.type, currentTransactions);
+        if (STACK_CONFIG[prepared.type]) {
+          applyStackedDatasets(prepared.type, currentTransactions);
         } else {
           applyDefaultDatasets();
         }
@@ -386,8 +386,8 @@
         currentTransactions = [];
         currentTransactionsMessage = 'Unable to load transactions. Please try again.';
         renderTransactionsTable();
-        if (prepared.type === 'category') {
-          applyStackedDatasets(currentFilter.type, []);
+        if (STACK_CONFIG[prepared.type]) {
+          applyStackedDatasets(prepared.type, []);
         } else {
           applyDefaultDatasets();
         }
