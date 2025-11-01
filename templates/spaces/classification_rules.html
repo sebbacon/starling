@@ -31,17 +31,7 @@
             <input type="hidden" name="rule_id" value="{{ selected_rule.id }}" />
           {% endif %}
           <div class="form-fields">
-            {% for field in form %}
-              <div class="field">
-                <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}*{% endif %}</label>
-                {{ field }}
-                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
-                {% for error in field.errors %}<p class="error">{{ error }}</p>{% endfor %}
-              </div>
-            {% endfor %}
-            {% if form.non_field_errors %}
-              {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
-            {% endif %}
+            {% include "spaces/includes/classification_rule_form_fields.html" %}
           </div>
           <button type="submit" class="primary">{% if selected_rule %}Update rule{% else %}Create rule{% endif %}</button>
           {% if selected_rule %}

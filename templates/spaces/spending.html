@@ -102,12 +102,146 @@
     }
     .counterparty-rule {
       margin-left: 0.4rem;
+      background: none;
+      border: none;
       color: #6b7280;
-      text-decoration: none;
+      cursor: pointer;
       font-size: 0.85rem;
+      padding: 0;
+      text-decoration: none;
     }
-    .counterparty-rule:hover {
+    .counterparty-rule:hover,
+    .counterparty-rule:focus {
       color: #34d399;
+      outline: none;
+    }
+    .quick-rule-feedback {
+      margin-top: 0.75rem;
+      color: #9ca3af;
+      min-height: 1.2rem;
+    }
+    .quick-rule-modal {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(6px);
+      z-index: 50;
+    }
+    .quick-rule-modal[hidden] {
+      display: none;
+    }
+    .quick-rule-modal__backdrop {
+      position: absolute;
+      inset: 0;
+    }
+    .quick-rule-modal__dialog {
+      position: relative;
+      background: #1f2937;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      padding: 1.25rem;
+      max-width: 420px;
+      width: min(92vw, 420px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+      z-index: 1;
+    }
+    .quick-rule-modal__content {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .quick-rule-modal__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .quick-rule-modal__close {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      cursor: pointer;
+      font-size: 1.5rem;
+      line-height: 1;
+      padding: 0.25rem;
+    }
+    .quick-rule-modal__close:hover,
+    .quick-rule-modal__close:focus {
+      color: #f9fafb;
+    }
+    .quick-rule-modal__summary {
+      margin: 0 0 0.5rem;
+      color: #d1d5db;
+    }
+    .quick-rule-modal__form .form-fields {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .quick-rule-modal__form .field label {
+      font-weight: 600;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .quick-rule-modal__form .field input,
+    .quick-rule-modal__form .field select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #2f3c52;
+      background: rgba(31, 41, 55, 0.85);
+      color: #e5e7eb;
+    }
+    .quick-rule-modal__checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      color: #d1d5db;
+      font-size: 0.95rem;
+    }
+    .quick-rule-modal__checkbox input[type="checkbox"] {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .quick-rule-modal__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+    }
+    .quick-rule-modal__actions .primary {
+      background: #34d399;
+      border: none;
+      color: #101215;
+      font-weight: 600;
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .quick-rule-modal__actions .primary:hover {
+      filter: brightness(1.05);
+    }
+    .quick-rule-modal__actions .secondary {
+      background: transparent;
+      border: 1px solid rgba(148, 163, 184, 0.45);
+      color: #d1d5db;
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .quick-rule-modal__actions .secondary:hover {
+      border-color: #f3f4f6;
+      color: #f3f4f6;
+    }
+    .quick-rule-modal__loading {
+      margin: 1rem 0;
+      color: #d1d5db;
+    }
+    body.modal-open {
+      overflow: hidden;
     }
     .overview-container {
       margin-top: 1.25rem;
@@ -206,7 +340,15 @@
         <span class="status" id="recategorise-status" role="status" aria-live="polite"></span>
       </form>
     </div>
+    <div id="quick-rule-feedback" class="quick-rule-feedback" role="status" aria-live="polite"></div>
   </section>
+
+  <div class="quick-rule-modal" id="quick-rule-modal" hidden aria-hidden="true">
+    <div class="quick-rule-modal__backdrop" data-close-quick-rule></div>
+    <div class="quick-rule-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="quick-rule-modal-title">
+      <div id="quick-rule-modal-content" class="quick-rule-modal__content"></div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script>
@@ -222,6 +364,7 @@
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
     const rulesPageBase = "{% url 'spaces:classification-rules' %}";
+    const quickRuleEndpoint = "{% url 'spaces:classification-rules-quick' %}";
     const summaryDaysDefault = {{ summary_days }};
     const overviewDays = 1825;
     const initialCategory = "{{ initial_category|escapejs }}";
@@ -266,6 +409,110 @@
     const recategoriseCategory = document.getElementById('recategorise-category');
     const recategoriseButton = document.getElementById('recategorise-submit');
     const recategoriseStatus = document.getElementById('recategorise-status');
+    const quickRuleModal = document.getElementById('quick-rule-modal');
+    const quickRuleContent = document.getElementById('quick-rule-modal-content');
+    const quickRuleFeedback = document.getElementById('quick-rule-feedback');
+    let quickRuleReturnFocus = null;
+
+    function openQuickRuleModal(params = {}) {
+      if (!quickRuleModal || !quickRuleContent) {
+        return;
+      }
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === null) {
+          return;
+        }
+        const trimmed = typeof value === 'string' ? value.trim() : String(value).trim();
+        if (!trimmed) {
+          return;
+        }
+        query.set(key, trimmed);
+      });
+      quickRuleReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      quickRuleModal.hidden = false;
+      quickRuleModal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+      quickRuleContent.innerHTML = '<p class="quick-rule-modal__loading">Loading…</p>';
+      const url = query.toString() ? `${quickRuleEndpoint}?${query.toString()}` : quickRuleEndpoint;
+      htmx.ajax('GET', url, { target: '#quick-rule-modal-content', swap: 'innerHTML' });
+    }
+
+    function closeQuickRuleModal() {
+      if (!quickRuleModal || quickRuleModal.hidden) {
+        return;
+      }
+      quickRuleModal.hidden = true;
+      quickRuleModal.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('modal-open');
+      quickRuleContent.innerHTML = '';
+      if (quickRuleReturnFocus && document.body.contains(quickRuleReturnFocus)) {
+        quickRuleReturnFocus.focus();
+      }
+      quickRuleReturnFocus = null;
+    }
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.matches('[data-close-quick-rule]')) {
+        event.preventDefault();
+        closeQuickRuleModal();
+      }
+    });
+
+    if (quickRuleModal) {
+      quickRuleModal.addEventListener('click', (event) => {
+        if (event.target === quickRuleModal) {
+          closeQuickRuleModal();
+        }
+      });
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && quickRuleModal && !quickRuleModal.hidden) {
+        closeQuickRuleModal();
+      }
+    });
+
+    document.body.addEventListener('htmx:afterSwap', (event) => {
+      if (event.target.id === 'quick-rule-modal-content') {
+        const focusable = event.target.querySelector('select, input:not([type="hidden"]), button');
+        if (focusable instanceof HTMLElement) {
+          focusable.focus();
+        }
+      }
+    });
+
+    document.body.addEventListener('rule-created', (event) => {
+      closeQuickRuleModal();
+      if (quickRuleFeedback) {
+        const detail = event.detail || {};
+        const parts = [];
+        if (detail.pattern) {
+          parts.push(`pattern ${detail.pattern}`);
+        }
+        if (detail.category) {
+          parts.push(`category ${detail.category}`);
+        }
+        if (detail.applied) {
+          parts.push('rules applied');
+        }
+        quickRuleFeedback.textContent = parts.length ? `Rule saved for ${parts.join(' → ')}` : 'Rule saved.';
+      }
+      if (currentFilter) {
+        const filterToReload = { ...currentFilter };
+        void loadTransactions(filterToReload);
+      }
+    });
+
+    document.body.addEventListener('htmx:sendError', (event) => {
+      if (event.target.id === 'quick-rule-modal-content' && quickRuleFeedback) {
+        if (quickRuleContent) {
+          quickRuleContent.innerHTML = '<p class="quick-rule-modal__loading">Unable to load quick rule form.</p>';
+        }
+        quickRuleFeedback.textContent = 'Unable to load quick rule form.';
+      }
+    });
     const STACK_CONFIG = {
       category: {
         mode: 'counterparty',
@@ -687,17 +934,27 @@
           const textSpan = document.createElement('span');
           textSpan.textContent = txn.counterparty;
           counterpartyCell.appendChild(textSpan);
-          const ruleLink = document.createElement('a');
           const params = new URLSearchParams({
             pattern: txn.counterparty,
             rule_type: 'counterparty_regex',
           });
-          ruleLink.href = `${rulesPageBase}?${params.toString()}`;
-          ruleLink.classList.add('counterparty-rule');
-          ruleLink.setAttribute('title', 'Create classification rule for this counterparty');
-          ruleLink.setAttribute('aria-label', `Create rule for ${txn.counterparty}`);
-          ruleLink.textContent = '⚙️';
-          counterpartyCell.appendChild(ruleLink);
+          const ruleButton = document.createElement('button');
+          ruleButton.type = 'button';
+          ruleButton.classList.add('counterparty-rule');
+          ruleButton.setAttribute('title', 'Create classification rule for this counterparty');
+          ruleButton.setAttribute('aria-label', `Create rule for ${txn.counterparty}`);
+          ruleButton.textContent = '⚙️';
+          ruleButton.addEventListener('click', (event) => {
+            if (event.metaKey || event.ctrlKey) {
+              window.open(`${rulesPageBase}?${params.toString()}`, '_blank');
+              return;
+            }
+            openQuickRuleModal({
+              pattern: txn.counterparty,
+              rule_type: 'counterparty_regex',
+            });
+          });
+          counterpartyCell.appendChild(ruleButton);
         } else {
           counterpartyCell.textContent = '—';
         }

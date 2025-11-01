@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -187,3 +188,80 @@ def test_apply_rules_triggers_command(monkeypatch):
     response = client.post(reverse("spaces:classification-rules-apply"))
     assert response.status_code == 302
     assert calls == ["reclassify_transactions"]
+
+
+def test_quick_rule_form_prefills_pattern_and_rule_type():
+    client = Client()
+    response = client.get(
+        reverse("spaces:classification-rules-quick"),
+        {"pattern": "Bean Co", "rule_type": "counterparty_regex"},
+    )
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Bean Co" in content
+    assert "counterparty_regex" in content
+
+
+def test_quick_rule_form_creates_rule_and_applies(monkeypatch):
+    calls = []
+
+    def fake_call_command(name, *args, **kwargs):
+        calls.append(name)
+
+    monkeypatch.setattr("starling_web.spaces.views.call_command", fake_call_command)
+
+    ClassificationRule.objects.create(
+        position=0,
+        rule_type="space",
+        category="Mortgage",
+        reason="existing",
+        space_uid="space-123",
+    )
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(
+        reverse("spaces:classification-rules-quick"),
+        data={
+            "position": 1,
+            "rule_type": "counterparty_regex",
+            "category": "Food",
+            "pattern": "(?i)Bean Co",
+            "apply_rules": "1",
+        },
+    )
+    assert response.status_code == 204
+    created = ClassificationRule.objects.exclude(rule_type="space").get()
+    assert created.position == 1
+    assert created.pattern == "(?i)Bean Co"
+    trigger = response.headers.get("HX-Trigger")
+    assert trigger
+    data = json.loads(trigger)
+    assert data["rule-created"]["applied"] is True
+    assert calls == ["reclassify_transactions"]
+
+
+def test_quick_rule_form_allows_skip_apply(monkeypatch):
+    calls = []
+
+    def fake_call_command(name, *args, **kwargs):
+        calls.append(name)
+
+    monkeypatch.setattr("starling_web.spaces.views.call_command", fake_call_command)
+
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(
+        reverse("spaces:classification-rules-quick"),
+        data={
+            "position": 5,
+            "rule_type": "counterparty_regex",
+            "category": "Holidays",
+            "pattern": "(?i)Relax",
+        },
+    )
+    assert response.status_code == 204
+    rule = ClassificationRule.objects.get(rule_type="counterparty_regex", pattern="(?i)Relax")
+    assert rule.position == 5
+    assert calls == []
+    trigger = response.headers.get("HX-Trigger")
+    assert trigger
+    data = json.loads(trigger)
+    assert data["rule-created"]["applied"] is False

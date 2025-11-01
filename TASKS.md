@@ -1,0 +1,8 @@
+- Make it so that the colors chosen for each category will always be the same, e.g. by hashing the names and then converting to a consistent lookup table. This should also apply wherever colors are used in bar charts.
+- I just want to double check that I'm seeing all transactions. Does every transaction have a category? or is it possible to have a null category and for it to still display in the interface or is there a catch-all category within starling
+- Add a search (counterparty, amount) box in top nav which shows results on /spending page
+- Add a date range control that allows zooming into a week-level resulollution and out to a 5-year resolution, updating the chart and the transactions. Will have to think about usability: a slider under the histogram is intuitive but the handles would be very hard to grab if it mainted a scale of 5 years, etc. What is the best choice here for a natural gensture that aligns with the current UX, easy to experiment
+- Move the classification_rules.yaml logic so the rules like in a database table
+- Add a select column to the left of the transaction table, with a "select all" option
+- Add an "recategorise" form element to the bottom of the transaction table, with a dropdown of existing categories, which allows the user to manually set them. Record this recategorisation as a specific "manual" type (to distinguish from the regex or rules-based ones).
+- make rules-based categorsation also have a date range that can apply to it, e.g. recategorise all transactions matching this regular expression on this field to be such and such a category, but only between dates A and B.

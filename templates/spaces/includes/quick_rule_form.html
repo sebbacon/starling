@@ -1,0 +1,39 @@
+<div class="quick-rule-modal__header">
+  <h2 id="quick-rule-modal-title">Create Classification Rule</h2>
+  <button type="button" class="quick-rule-modal__close" data-close-quick-rule>&times;</button>
+</div>
+<form
+  method="post"
+  hx-post="{% url 'spaces:classification-rules-quick' %}"
+  hx-target="#quick-rule-modal-content"
+  hx-swap="innerHTML"
+  class="quick-rule-modal__form"
+>
+  {% csrf_token %}
+  {% if rule_type_label or pattern_value %}
+    <p class="quick-rule-modal__summary">
+      Rule triggers when
+      {% if rule_type_label %} <strong>{{ rule_type_label }}</strong>{% endif %}
+      {% if pattern_value %}
+        {% if rule_type_label %} matching {% else %} pattern {% endif %}
+        <code>{{ pattern_value }}</code>
+      {% endif %}
+    </p>
+  {% endif %}
+  <div class="form-fields">
+    {% include "spaces/includes/classification_rule_form_fields.html" %}
+  </div>
+  <label class="quick-rule-modal__checkbox">
+    <input
+      type="checkbox"
+      name="apply_rules"
+      value="1"
+      {% if apply_rules_checked %}checked{% endif %}
+    />
+    <span>Apply rules immediately after saving</span>
+  </label>
+  <div class="quick-rule-modal__actions">
+    <button type="submit" class="primary">Save rule</button>
+    <button type="button" class="secondary" data-close-quick-rule>Cancel</button>
+  </div>
+</form>

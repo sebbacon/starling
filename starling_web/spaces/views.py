@@ -8,7 +8,7 @@ from django import forms
 from django.conf import settings
 from django.db.models import Q, Max
 from django.db.models.functions import Upper
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
@@ -30,6 +30,7 @@ RULE_TYPE_CHOICES = [
     ("starling_category", "Starling spending category fallback"),
     ("space_name", "Use space name as category"),
 ]
+RULE_TYPE_LABELS = dict(RULE_TYPE_CHOICES)
 
 
 def _iter_json_paths(data, prefix=None, array_limit=5):
@@ -56,6 +57,44 @@ def collect_json_paths(limit=200):
                 seen.add(path)
                 collected.append(path)
     return collected
+
+
+def _get_rule_form_choices():
+    category_options_query = (
+        Category.objects.filter(category_type="spending")
+        .exclude(name__isnull=True)
+        .exclude(name="")
+        .values_list("name", flat=True)
+        .distinct()
+    )
+    category_options = list(category_options_query)
+    if "Uncategorised" not in category_options:
+        category_options.append("Uncategorised")
+
+    space_options_query = (
+        Category.objects.filter(category_type="space")
+        .exclude(space_uid__isnull=True)
+        .exclude(space_uid="")
+        .values("space_uid", "name")
+        .distinct()
+    )
+    space_choices = []
+    for item in space_options_query:
+        label = item["name"] or item["space_uid"]
+        space_choices.append((item["space_uid"], label))
+
+    json_path_options = collect_json_paths()
+    return category_options, space_choices, json_path_options
+
+
+def _prepare_quick_rule_form(form, locked_rule_type=None):
+    hidden_fields = ["position", "reason", "space_uid", "json_path", "start_date", "end_date"]
+    for field_name in hidden_fields:
+        if field_name in form.fields:
+            form.fields[field_name].widget = forms.HiddenInput()
+    if locked_rule_type and locked_rule_type in RULE_TYPE_LABELS:
+        label = RULE_TYPE_LABELS[locked_rule_type]
+        form.fields["rule_type"].choices = [(locked_rule_type, label)]
 
 
 class ClassificationRuleForm(forms.ModelForm):
@@ -364,28 +403,7 @@ def recategorise_transactions(request):
 @require_http_methods(["GET", "POST"])
 def manage_classification_rules(request):
     rules = ClassificationRule.objects.order_by("position", "id")
-    category_options_query = (
-        Category.objects.filter(category_type="spending")
-        .exclude(name__isnull=True)
-        .exclude(name="")
-        .values_list("name", flat=True)
-        .distinct()
-    )
-    category_options = list(category_options_query)
-    if "Uncategorised" not in category_options:
-        category_options.append("Uncategorised")
-    space_options_query = (
-        Category.objects.filter(category_type="space")
-        .exclude(space_uid__isnull=True)
-        .exclude(space_uid="")
-        .values("space_uid", "name")
-        .distinct()
-    )
-    space_choices = []
-    for item in space_options_query:
-        label = item["name"] or item["space_uid"]
-        space_choices.append((item["space_uid"], label))
-    json_path_options = collect_json_paths()
+    category_options, space_choices, json_path_options = _get_rule_form_choices()
     selected_rule = None
     selected_rule_id = request.GET.get("rule")
     if selected_rule_id:
@@ -471,6 +489,71 @@ def apply_classification_rules(request):
     except Exception:  # pragma: no cover - surface error message
         return redirect(f"{reverse('spaces:classification-rules')}?status=apply-error")
     return redirect(f"{reverse('spaces:classification-rules')}?status=applied")
+
+
+@require_http_methods(["GET", "POST"])
+def quick_classification_rule(request):
+    category_options, space_choices, json_path_options = _get_rule_form_choices()
+    locked_rule_type = request.GET.get("rule_type") or request.POST.get("rule_type")
+    if locked_rule_type not in RULE_TYPE_LABELS:
+        locked_rule_type = None
+    apply_rules_selected = True
+    if request.method == "POST":
+        apply_rules_selected = bool(request.POST.get("apply_rules"))
+
+    form_kwargs = {
+        "category_choices": category_options,
+        "space_choices": space_choices,
+        "json_path_choices": json_path_options,
+    }
+
+    if request.method == "POST":
+        form = ClassificationRuleForm(request.POST, **form_kwargs)
+        _prepare_quick_rule_form(form, locked_rule_type)
+        if form.is_valid():
+            rule = form.save(commit=False)
+            if rule.position is None:
+                max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
+                rule.position = max_position + 1
+            rule.save()
+            trigger_payload = {
+                "ruleType": rule.rule_type,
+                "pattern": rule.pattern or "",
+                "category": rule.category or "",
+                "applied": apply_rules_selected,
+            }
+            if apply_rules_selected:
+                buffer = io.StringIO()
+                call_command("reclassify_transactions", stdout=buffer, stderr=buffer)
+            response = HttpResponse(status=204)
+            response["HX-Trigger"] = json.dumps({"rule-created": trigger_payload})
+            return response
+    else:
+        max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
+        initial = {"position": max_position + 1}
+        if request.GET.get("pattern"):
+            initial["pattern"] = request.GET.get("pattern")
+        if locked_rule_type:
+            initial["rule_type"] = locked_rule_type
+        form = ClassificationRuleForm(initial=initial, **form_kwargs)
+        _prepare_quick_rule_form(form, locked_rule_type)
+
+    current_rule_type = (
+        form.data.get("rule_type")
+        if form.is_bound
+        else form.initial.get("rule_type")
+    )
+    if current_rule_type not in RULE_TYPE_LABELS:
+        current_rule_type = None
+
+    pattern_value = form.data.get("pattern") if form.is_bound else form.initial.get("pattern", "")
+    context = {
+        "form": form,
+        "pattern_value": pattern_value or "",
+        "rule_type_label": RULE_TYPE_LABELS.get(current_rule_type),
+        "apply_rules_checked": apply_rules_selected,
+    }
+    return render(request, "spaces/includes/quick_rule_form.html", context, status=200)
 
 def _parse_positive_int(value, default):
     if not value:
