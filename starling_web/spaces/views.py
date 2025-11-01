@@ -16,6 +16,7 @@ from django.core.management import call_command
 
 from starling_spaces.analytics import (
     calculate_spend_by_category,
+    summarise_category_totals,
     EXCLUDED_TRANSFER_SOURCES,
 )
 from starling_web.spaces.models import Category, ClassificationRule, FeedItem
@@ -31,6 +32,13 @@ RULE_TYPE_CHOICES = [
     ("space_name", "Use space name as category"),
 ]
 RULE_TYPE_LABELS = dict(RULE_TYPE_CHOICES)
+
+CATEGORY_PERIODS = {
+    "past_month": {"label": "Past 30 days", "metric": "total"},
+    "all_time": {"label": "All time", "metric": "total"},
+    "monthly_average": {"label": "Monthly average", "metric": "average"},
+}
+CATEGORY_DEFAULT_PERIOD = "past_month"
 
 
 def _iter_json_paths(data, prefix=None, array_limit=5):
@@ -233,6 +241,47 @@ class ClassificationRuleForm(forms.ModelForm):
             cleaned["category"] = category.strip() or None
 
         return cleaned
+
+
+@require_GET
+def categories_overview(request):
+    selected_period = request.GET.get("period")
+    if selected_period not in CATEGORY_PERIODS:
+        selected_period = CATEGORY_DEFAULT_PERIOD
+
+    period_options = [
+        {
+            "key": key,
+            "label": meta["label"],
+            "metric": meta["metric"],
+            "active": key == selected_period,
+        }
+        for key, meta in CATEGORY_PERIODS.items()
+    ]
+
+    context = {
+        "periods": period_options,
+        "default_period": selected_period,
+        "data_endpoint": reverse("spaces:categories-data"),
+    }
+    return render(request, "spaces/categories.html", context)
+
+
+@require_GET
+def categories_data(request):
+    period = request.GET.get("period") or CATEGORY_DEFAULT_PERIOD
+    if period not in CATEGORY_PERIODS:
+        return JsonResponse({"error": "Invalid period"}, status=400)
+
+    reference = _parse_reference_time(request.GET.get("reference"))
+    if reference is None:
+        reference = datetime.now(timezone.utc)
+    else:
+        reference = _normalize_to_utc(reference)
+
+    summary = summarise_category_totals(period=period, reference_time=reference)
+    payload = _build_category_payload(summary, period)
+    return JsonResponse(payload)
 
 
 @require_GET
@@ -554,6 +603,58 @@ def quick_classification_rule(request):
         "apply_rules_checked": apply_rules_selected,
     }
     return render(request, "spaces/includes/quick_rule_form.html", context, status=200)
+
+
+def _build_category_payload(summary, period_key):
+    meta = CATEGORY_PERIODS[period_key]
+    months = summary.get("months") or 0
+    entries = []
+    total_value_minor = 0.0
+    for category_name, total_minor_units in summary.get("categories", []):
+        total_minor_units = int(total_minor_units)
+        if meta["metric"] == "average":
+            if months > 0:
+                value_minor = total_minor_units / months
+            else:
+                value_minor = 0.0
+        else:
+            value_minor = float(total_minor_units)
+        entry = {
+            "category": category_name,
+            "totalMinorUnits": total_minor_units,
+            "total": round(total_minor_units / 100, 2),
+            "valueMinorUnits": value_minor,
+            "value": round(value_minor / 100, 2),
+        }
+        entries.append(entry)
+        total_value_minor += value_minor
+
+    entries.sort(key=lambda item: item["valueMinorUnits"], reverse=True)
+
+    if total_value_minor > 0:
+        for item in entries:
+            item["percentage"] = (item["valueMinorUnits"] / total_value_minor) * 100
+    else:
+        for item in entries:
+            item["percentage"] = 0.0
+
+    start = summary.get("start")
+    end = summary.get("end")
+    reference = summary.get("reference")
+
+    return {
+        "period": period_key,
+        "metric": meta["metric"],
+        "periodLabel": meta["label"],
+        "reference": reference.isoformat() if reference else None,
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "categories": entries,
+        "totalMinorUnits": float(total_value_minor),
+        "total": round(total_value_minor / 100, 2),
+        "months": months,
+    }
+
 
 def _parse_positive_int(value, default):
     if not value:

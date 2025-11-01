@@ -1,0 +1,463 @@
+{% extends "base.html" %}
+
+{% block title %}Category Insights{% endblock %}
+
+{% block content %}
+  <section class="card categories-card" data-endpoint="{{ data_endpoint }}" data-default-period="{{ default_period }}">
+    <header class="categories-card__header">
+      <div>
+        <h1>Category Insights</h1>
+        <p>Compare spending categories to understand where money goes over time.</p>
+      </div>
+      <div class="categories-periods" role="group" aria-label="Time periods">
+        {% for period in periods %}
+          <button
+            type="button"
+            class="categories-periods__button{% if period.active %} is-active{% endif %}"
+            data-period="{{ period.key }}"
+          >
+            <span class="categories-periods__label">{{ period.label }}</span>
+            <small class="categories-periods__metric">{{ period.metric|title }}</small>
+          </button>
+        {% endfor %}
+      </div>
+    </header>
+
+    <div class="categories-visualisation">
+      <div class="categories-chart__canvas">
+        <canvas id="categories-chart"></canvas>
+      </div>
+      <dl class="categories-summary">
+        <div>
+          <dt>Current window</dt>
+          <dd id="categories-range">Past 30 days</dd>
+        </div>
+        <div>
+          <dt>Metric</dt>
+          <dd id="categories-metric">Total</dd>
+        </div>
+        <div>
+          <dt>Total</dt>
+          <dd id="categories-total">£0.00</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="categories-table__wrapper">
+      <table class="categories-table">
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            <th scope="col">Share</th>
+            <th scope="col">Metric value</th>
+            <th scope="col">All-time total</th>
+          </tr>
+        </thead>
+        <tbody id="categories-table-body">
+          <tr class="placeholder">
+            <td colspan="4">Loading categories…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <style>
+    .categories-card {
+      display: grid;
+      gap: 1.5rem;
+    }
+    .categories-card__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .categories-periods {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .categories-periods__button {
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      background: transparent;
+      color: #e5e7eb;
+      border-radius: 999px;
+      padding: 0.35rem 0.85rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.15rem;
+      min-width: 120px;
+    }
+    .categories-periods__button.is-active {
+      background: rgba(52, 211, 153, 0.12);
+      border-color: rgba(52, 211, 153, 0.6);
+      color: #34d399;
+    }
+    .categories-periods__label {
+      font-weight: 600;
+    }
+    .categories-periods__metric {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(226, 232, 240, 0.6);
+    }
+    .categories-visualisation {
+      display: grid;
+      gap: 1rem;
+    }
+    .categories-chart__canvas {
+      position: relative;
+      min-height: 320px;
+      height: 380px;
+    }
+    @media (max-width: 600px) {
+      .categories-chart__canvas {
+        height: 320px;
+      }
+    }
+    .categories-chart__canvas canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
+    .categories-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.5);
+    }
+    .categories-summary dt {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(148, 163, 184, 0.85);
+    }
+    .categories-summary dd {
+      margin: 0.15rem 0 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #f9fafb;
+    }
+    .categories-table__wrapper {
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .categories-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .categories-table th,
+    .categories-table td {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid rgba(55, 65, 81, 0.6);
+      text-align: left;
+    }
+    .categories-table th {
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(148, 163, 184, 0.8);
+    }
+    .categories-table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .categories-table tr:nth-child(even) {
+      background: rgba(30, 41, 59, 0.35);
+    }
+    .categories-table .placeholder td {
+      text-align: center;
+      color: rgba(148, 163, 184, 0.7);
+      font-style: italic;
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const card = document.querySelector('.categories-card');
+      if (!card) {
+        return;
+      }
+      const endpoint = card.dataset.endpoint || '';
+      const defaultPeriod = card.dataset.defaultPeriod || 'past_month';
+      const periodButtons = Array.from(card.querySelectorAll('[data-period]'));
+      const rangeEl = document.getElementById('categories-range');
+      const metricEl = document.getElementById('categories-metric');
+      const totalEl = document.getElementById('categories-total');
+      const tableBody = document.getElementById('categories-table-body');
+      const chartCanvas = document.getElementById('categories-chart');
+      let chartInstance = null;
+      let currentPeriod = defaultPeriod;
+      let currentRequest = null;
+
+      const metricLabels = {
+        total: 'Total spend',
+        average: 'Monthly average',
+      };
+
+      function setLoading() {
+        if (tableBody) {
+          tableBody.innerHTML = '<tr class="placeholder"><td colspan="4">Loading categories…</td></tr>';
+        }
+      }
+
+      function setError() {
+        if (tableBody) {
+          tableBody.innerHTML = '<tr class="placeholder"><td colspan="4">Unable to load categories right now.</td></tr>';
+        }
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        if (chartCanvas) {
+          chartCanvas.style.display = 'none';
+        }
+      }
+
+      function formatCurrency(value) {
+        const num = Number.isFinite(value) ? value : parseFloat(value);
+        if (!Number.isFinite(num)) {
+          return '£0.00';
+        }
+        return new Intl.NumberFormat('en-GB', {
+          style: 'currency',
+          currency: 'GBP',
+          minimumFractionDigits: 2,
+        }).format(num);
+      }
+
+      function formatPercent(value) {
+        if (!Number.isFinite(value)) {
+          return '0%';
+        }
+        return `${value.toFixed(1)}%`;
+      }
+
+      function formatDateLabel(iso) {
+        if (!iso) {
+          return '';
+        }
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+          return '';
+        }
+        return date.toLocaleDateString('en-GB', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+      }
+
+      function describeRange(payload) {
+        const startLabel = formatDateLabel(payload.start);
+        const endLabel = formatDateLabel(payload.end);
+        if (!startLabel && !endLabel) {
+          return payload.periodLabel || 'All time';
+        }
+        let result = `${startLabel || '—'} → ${endLabel || '—'}`;
+        if (payload.metric === 'average' && payload.months) {
+          const months = payload.months;
+          result += ` (${months} month${months === 1 ? '' : 's'})`;
+        }
+        return result;
+      }
+
+      function syncButtons() {
+        periodButtons.forEach((button) => {
+          const isActive = button.dataset.period === currentPeriod;
+          button.classList.toggle('is-active', isActive);
+          button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+      }
+
+      function renderTable(payload) {
+        if (!tableBody) {
+          return;
+        }
+        if (!payload.categories || payload.categories.length === 0) {
+          tableBody.innerHTML = '<tr class="placeholder"><td colspan="4">No spending recorded for this period.</td></tr>';
+          return;
+        }
+        const rows = payload.categories.map((row) => {
+          const share = formatPercent(row.percentage);
+          const metricValue = formatCurrency(row.value);
+          const totalValue = formatCurrency(row.total);
+          return `
+            <tr>
+              <td>${row.category}</td>
+              <td class="numeric">${share}</td>
+              <td class="numeric">${metricValue}</td>
+              <td class="numeric">${totalValue}</td>
+            </tr>
+          `;
+        });
+        tableBody.innerHTML = rows.join('');
+      }
+
+      function renderChart(payload) {
+        if (!chartCanvas) {
+          return;
+        }
+        if (!payload.categories || payload.categories.length === 0) {
+          if (chartInstance) {
+            chartInstance.destroy();
+            chartInstance = null;
+          }
+          if (chartCanvas) {
+            chartCanvas.style.display = 'none';
+          }
+          return;
+        }
+        chartCanvas.style.display = 'block';
+        const labels = payload.categories.map((row) => row.category);
+        const values = payload.categories.map((row) => Number(row.value));
+        const background = labels.map((_, index) => {
+          const base = [52, 211, 153];
+          const factor = 0.85 - Math.min(index, 8) * 0.05;
+          return `rgba(${base[0]}, ${base[1]}, ${base[2]}, ${Math.max(factor, 0.35)})`;
+        });
+        const data = {
+          labels,
+          datasets: [
+            {
+              label: payload.metric === 'average' ? 'Monthly average' : 'Total spend',
+              data: values,
+              backgroundColor: background,
+              borderRadius: 10,
+              borderSkipped: false,
+              maxBarThickness: 32,
+            },
+          ],
+        };
+        const options = {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              ticks: {
+                callback: (value) => formatCurrency(value),
+                color: '#cbd5f5',
+              },
+              grid: {
+                color: 'rgba(148, 163, 184, 0.2)',
+              },
+            },
+            y: {
+              ticks: {
+                color: '#e5e7eb',
+              },
+              grid: {
+                display: false,
+              },
+              barPercentage: 0.8,
+              categoryPercentage: 0.9,
+            },
+          },
+          plugins: {
+            legend: {
+              display: false,
+            },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const row = payload.categories[context.dataIndex];
+                  const value = formatCurrency(context.parsed.x);
+                  const share = formatPercent(row.percentage);
+                  return `${value} • ${share}`;
+                },
+              },
+            },
+          },
+        };
+        if (chartInstance) {
+          chartInstance.data = data;
+          chartInstance.options = options;
+          chartInstance.update();
+        } else {
+          chartInstance = new Chart(chartCanvas.getContext('2d'), {
+            type: 'bar',
+            data,
+            options,
+          });
+        }
+      }
+
+      function updateSummary(payload) {
+        if (rangeEl) {
+          rangeEl.textContent = describeRange(payload);
+        }
+        if (metricEl) {
+          metricEl.textContent = metricLabels[payload.metric] || payload.metric;
+        }
+        if (totalEl) {
+          totalEl.textContent = formatCurrency(payload.total);
+        }
+      }
+
+      async function loadPeriod(period) {
+        if (!endpoint) {
+          return;
+        }
+        currentPeriod = period;
+        syncButtons();
+        setLoading();
+        if (currentRequest) {
+          currentRequest.abort();
+        }
+        const controller = new AbortController();
+        currentRequest = controller;
+        try {
+          const url = new URL(endpoint, window.location.origin);
+          url.searchParams.set('period', period);
+          const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+          const payload = await response.json();
+          if (controller.signal.aborted) {
+            return;
+          }
+          updateSummary(payload);
+          renderTable(payload);
+          renderChart(payload);
+        } catch (error) {
+          if (controller.signal.aborted) {
+            return;
+          }
+          console.error('Unable to load categories data', error);
+          setError();
+        }
+      }
+
+      periodButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const period = button.dataset.period;
+          if (!period || period === currentPeriod) {
+            return;
+          }
+          loadPeriod(period);
+        });
+      });
+
+      loadPeriod(defaultPeriod);
+    });
+  </script>
+{% endblock %}

@@ -11,6 +11,8 @@ app_name = "spaces"
 
 urlpatterns = [
     path("", RedirectView.as_view(pattern_name="spaces:spending", permanent=False), name="home"),
+    path("categories/", views.categories_overview, name="categories"),
+    path("categories/data/", views.categories_data, name="categories-data"),
     path("spending/", views.spending, name="spending"),
     path("spending/category/<str:category_name>/", views.spending, name="spending-category"),
     path("spending/counterparty/<str:counterparty_name>/", views.spending, name="spending-counterparty"),

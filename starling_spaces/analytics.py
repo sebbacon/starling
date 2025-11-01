@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from django.db.models import F, Sum
+from django.db.models import F, Sum, Min, Max
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek, Upper
 
 from starling_web.spaces.models import FeedItem
@@ -99,4 +99,75 @@ def calculate_spend_by_category(*, days: int, reference_time=None, start_time=No
         "bucket": bucket,
         "start": window_start.isoformat(),
         "end": window_end.isoformat(),
+    }
+
+
+def summarise_category_totals(*, period: str, reference_time=None):
+    if period not in {"past_month", "all_time", "monthly_average"}:
+        raise ValueError(f"Unsupported period: {period}")
+
+    reference = reference_time or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    else:
+        reference = reference.astimezone(timezone.utc)
+
+    end = reference + timedelta(seconds=1)
+
+    base_queryset = (
+        FeedItem.objects.filter(
+            amount_minor_units__lt=0,
+            transaction_time__lt=end,
+        )
+        .annotate(source_upper=Upper("source"))
+        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+    )
+
+    if period == "past_month":
+        start = reference - timedelta(days=30)
+        queryset = base_queryset.filter(transaction_time__gte=start)
+        months_count = 0
+    else:
+        bounds = base_queryset.aggregate(
+            earliest=Min("transaction_time"),
+            latest=Max("transaction_time"),
+        )
+        earliest = bounds["earliest"]
+        latest = bounds["latest"]
+        if earliest is None or latest is None:
+            return {
+                "period": period,
+                "reference": reference,
+                "start": None,
+                "end": end,
+                "categories": [],
+                "months": 0,
+            }
+        start = earliest
+        queryset = base_queryset.filter(transaction_time__gte=start)
+        months_count = ((latest.year - earliest.year) * 12) + (latest.month - earliest.month) + 1
+
+    rows = (
+        queryset.values("classified_category")
+        .annotate(total_minor=Sum(-F("amount_minor_units")))
+        .order_by()
+    )
+
+    categories = []
+    for row in rows:
+        category_name = row["classified_category"] or "Uncategorised"
+        total_minor = int(row["total_minor"] or 0)
+        if total_minor <= 0:
+            continue
+        categories.append((category_name, total_minor))
+
+    categories.sort(key=lambda item: item[1], reverse=True)
+
+    return {
+        "period": period,
+        "reference": reference,
+        "start": start,
+        "end": end,
+        "categories": categories,
+        "months": months_count,
     }
