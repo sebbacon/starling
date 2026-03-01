@@ -178,6 +178,14 @@ def test_is_duplicate_transfer_error_uses_message_heuristic():
     )
 
 
+def test_is_duplicate_transfer_error_recognizes_idempotency_mismatch():
+    error = StarlingAPIError(
+        "{'errors': [{'message': 'IDEMPOTENCY_MISMATCH'}], 'success': False}",
+        status_code=400,
+    )
+    assert salary_automation._is_duplicate_transfer_error(error)
+
+
 # ---------------------------------------------------------------------------
 # _plan_initial_allocations
 # ---------------------------------------------------------------------------
@@ -358,7 +366,7 @@ def test_run_salary_automation_returns_no_salary_detected(respx_mock):
             "accounts": [
                 {
                     "accountUid": "acc-1",
-                    "name": "Kim & Sebastian",
+                    "name": "Joint",
                     "currency": "GBP",
                     "defaultCategory": "cat-1",
                 }
@@ -404,7 +412,7 @@ def test_resolve_main_account_raises_when_account_not_found(respx_mock):
 
 @respx.mock
 def test_resolve_main_account_raises_for_duplicate_accounts(respx_mock):
-    account = {"accountUid": "acc-1", "name": "Kim & Sebastian", "currency": "GBP", "defaultCategory": "cat-1"}
+    account = {"accountUid": "acc-1", "name": "Joint", "currency": "GBP", "defaultCategory": "cat-1"}
     respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
         json={"accounts": [account, account]}
     )
@@ -416,7 +424,7 @@ def test_resolve_main_account_raises_for_duplicate_accounts(respx_mock):
 @respx.mock
 def test_resolve_main_account_raises_for_missing_uid(respx_mock):
     respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
-        json={"accounts": [{"name": "Kim & Sebastian", "currency": "GBP", "defaultCategory": "cat-1"}]}
+        json={"accounts": [{"name": "Joint", "currency": "GBP", "defaultCategory": "cat-1"}]}
     )
     with httpx.Client(base_url="https://api.starlingbank.com") as client:
         with pytest.raises(salary_automation.SalaryAutomationError, match="missing account UID"):
@@ -426,7 +434,7 @@ def test_resolve_main_account_raises_for_missing_uid(respx_mock):
 @respx.mock
 def test_resolve_main_account_raises_for_missing_default_category(respx_mock):
     respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
-        json={"accounts": [{"accountUid": "acc-1", "name": "Kim & Sebastian", "currency": "GBP"}]}
+        json={"accounts": [{"accountUid": "acc-1", "name": "Joint", "currency": "GBP"}]}
     )
     with httpx.Client(base_url="https://api.starlingbank.com") as client:
         with pytest.raises(salary_automation.SalaryAutomationError, match="missing defaultCategory"):
@@ -436,7 +444,7 @@ def test_resolve_main_account_raises_for_missing_default_category(respx_mock):
 @respx.mock
 def test_resolve_main_account_raises_for_missing_currency(respx_mock):
     respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
-        json={"accounts": [{"accountUid": "acc-1", "name": "Kim & Sebastian", "defaultCategory": "cat-1"}]}
+        json={"accounts": [{"accountUid": "acc-1", "name": "Joint", "defaultCategory": "cat-1"}]}
     )
     with httpx.Client(base_url="https://api.starlingbank.com") as client:
         with pytest.raises(salary_automation.SalaryAutomationError, match="missing currency"):
@@ -489,7 +497,7 @@ def test_run_salary_automation_dry_run_skips_transfers(respx_mock):
             "accounts": [
                 {
                     "accountUid": "acc-1",
-                    "name": "Kim & Sebastian",
+                    "name": "Joint",
                     "currency": "GBP",
                     "defaultCategory": "cat-1",
                 }
@@ -552,7 +560,7 @@ def test_run_salary_automation_is_idempotent_with_deterministic_transfer_uids(re
             "accounts": [
                 {
                     "accountUid": "acc-123",
-                    "name": "Kim & Sebastian",
+                    "name": "Joint",
                     "currency": "GBP",
                     "defaultCategory": "cat-main",
                 }

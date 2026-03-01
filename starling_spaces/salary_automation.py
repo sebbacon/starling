@@ -552,6 +552,8 @@ def _is_duplicate_transfer_error(error: StarlingAPIError) -> bool:
     message = str(error).lower()
     if error.status_code in {409, 422}:
         return True
+    if "idempotency_mismatch" in message:
+        return True
     return "already" in message and "exist" in message or "duplicate" in message
 
 
