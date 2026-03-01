@@ -2,8 +2,6 @@ import json
 import math
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-import io
-
 from django import forms
 from django.conf import settings
 from django.db.models import Q, Max
@@ -67,17 +65,26 @@ def collect_json_paths(limit=200):
     return collected
 
 
-def _get_rule_form_choices():
-    category_options_query = (
+def _get_spending_category_options():
+    options = list(
         Category.objects.filter(category_type="spending")
         .exclude(name__isnull=True)
         .exclude(name="")
         .values_list("name", flat=True)
         .distinct()
     )
-    category_options = list(category_options_query)
-    if "Uncategorised" not in category_options:
-        category_options.append("Uncategorised")
+    if "Uncategorised" not in options:
+        options.append("Uncategorised")
+    return options
+
+
+def _next_rule_position():
+    max_pos = ClassificationRule.objects.aggregate(Max("position"))["position__max"]
+    return (max_pos or -1) + 1
+
+
+def _get_rule_form_choices():
+    category_options = _get_spending_category_options()
 
     space_options_query = (
         Category.objects.filter(category_type="space")
@@ -141,59 +148,40 @@ class ClassificationRuleForm(forms.ModelForm):
         self.json_path_choices = json_path_choices or []
         super().__init__(*args, **kwargs)
 
-        category_list = [("", "Select a category")]
-        for name in sorted(set(self.category_choices)):
-            category_list.append((name, name))
-        current_category = None
-        if self.is_bound:
-            current_category = self.data.get("category")
-        else:
-            current_category = self.initial.get("category") or getattr(self.instance, "category", None)
-        if current_category and current_category not in {value for value, _ in category_list}:
-            category_list.append((current_category, current_category))
-        self.fields["category"] = forms.ChoiceField(
-            choices=category_list,
-            required=False,
-            label="Category",
+        self.fields["category"] = self._build_choice_field(
+            "category",
+            [(name, name) for name in sorted(set(self.category_choices))],
+            "Select a category",
+            "Category",
         )
-        self.fields["category"].initial = current_category or ""
+        self.fields["space_uid"] = self._build_choice_field(
+            "space_uid",
+            [(value, label or value) for value, label in self.space_choices],
+            "Any space",
+            "Space UID",
+            help_text="Limit the rule to a particular Starling space.",
+        )
+        self.fields["json_path"] = self._build_choice_field(
+            "json_path",
+            [(path, path) for path in self.json_path_choices],
+            "Any JSON path",
+            "JSON path",
+            help_text="Dot-separated path in the stored transaction payload.",
+        )
 
-        space_list = [("", "Any space")]
-        for value, label in self.space_choices:
-            display = label or value
-            space_list.append((value, display))
-        current_space = None
+    def _build_choice_field(self, field_name, choices, default_label, label, help_text=None, required=False):
+        option_list = [("", default_label)] + list(choices)
         if self.is_bound:
-            current_space = self.data.get("space_uid")
+            current = self.data.get(field_name)
         else:
-            current_space = self.initial.get("space_uid") or getattr(self.instance, "space_uid", None)
-        if current_space and current_space not in {value for value, _ in space_list}:
-            space_list.append((current_space, current_space))
-        self.fields["space_uid"] = forms.ChoiceField(
-            choices=space_list,
-            required=False,
-            label="Space UID",
-        )
-        self.fields["space_uid"].initial = current_space or ""
-        self.fields["space_uid"].help_text = "Limit the rule to a particular Starling space."
-
-        path_list = [("", "Any JSON path")]
-        for path in self.json_path_choices:
-            path_list.append((path, path))
-        current_path = None
-        if self.is_bound:
-            current_path = self.data.get("json_path")
-        else:
-            current_path = self.initial.get("json_path") or getattr(self.instance, "json_path", None)
-        if current_path and current_path not in {value for value, _ in path_list}:
-            path_list.append((current_path, current_path))
-        self.fields["json_path"] = forms.ChoiceField(
-            choices=path_list,
-            required=False,
-            label="JSON path",
-        )
-        self.fields["json_path"].initial = current_path or ""
-        self.fields["json_path"].help_text = "Dot-separated path in the stored transaction payload."
+            current = self.initial.get(field_name) or getattr(self.instance, field_name, None)
+        if current and current not in {v for v, _ in option_list}:
+            option_list.append((current, current))
+        field = forms.ChoiceField(choices=option_list, required=required, label=label)
+        field.initial = current or ""
+        if help_text:
+            field.help_text = help_text
+        return field
 
     def clean(self):
         cleaned = super().clean()
@@ -276,8 +264,6 @@ def categories_data(request):
     reference = _parse_reference_time(request.GET.get("reference"))
     if reference is None:
         reference = datetime.now(timezone.utc)
-    else:
-        reference = _normalize_to_utc(reference)
 
     summary = summarise_category_totals(period=period, reference_time=reference)
     payload = _build_category_payload(summary, period)
@@ -294,16 +280,7 @@ def spending(request, category_name=None, counterparty_name=None):
 
     search_query = (request.GET.get("search") or "").strip()
 
-    category_options_query = (
-        Category.objects.filter(category_type="spending")
-        .exclude(name__isnull=True)
-        .exclude(name="")
-        .values_list("name", flat=True)
-        .distinct()
-    )
-    category_options = list(category_options_query)
-    if "Uncategorised" not in category_options:
-        category_options.append("Uncategorised")
+    category_options = _get_spending_category_options()
     counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
@@ -491,29 +468,27 @@ def manage_classification_rules(request):
         if form.is_valid():
             rule = form.save(commit=False)
             if rule.position is None:
-                max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
-                rule.position = max_position + 1
+                rule.position = _next_rule_position()
             rule.save()
             next_status = "updated" if instance else "created"
             return redirect(f"{reverse('spaces:classification-rules')}?status={next_status}&rule={rule.pk}")
     else:
-        initial = {}
-        max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
-        initial["position"] = max_position + 1
-        if request.GET.get("pattern"):
-            initial["pattern"] = request.GET.get("pattern")
-        pref_rule_type = request.GET.get("rule_type")
-        if pref_rule_type in dict(RULE_TYPE_CHOICES):
-            initial["rule_type"] = pref_rule_type
-        form = ClassificationRuleForm(
-            initial=initial,
-            category_choices=category_options,
-            space_choices=space_choices,
-            json_path_choices=json_path_options,
-        )
         if selected_rule:
             form = ClassificationRuleForm(
                 instance=selected_rule,
+                category_choices=category_options,
+                space_choices=space_choices,
+                json_path_choices=json_path_options,
+            )
+        else:
+            initial = {"position": _next_rule_position()}
+            if request.GET.get("pattern"):
+                initial["pattern"] = request.GET.get("pattern")
+            pref_rule_type = request.GET.get("rule_type")
+            if pref_rule_type in dict(RULE_TYPE_CHOICES):
+                initial["rule_type"] = pref_rule_type
+            form = ClassificationRuleForm(
+                initial=initial,
                 category_choices=category_options,
                 space_choices=space_choices,
                 json_path_choices=json_path_options,
@@ -532,9 +507,8 @@ def manage_classification_rules(request):
 
 @require_POST
 def apply_classification_rules(request):
-    buffer = io.StringIO()
     try:
-        call_command("reclassify_transactions", stdout=buffer, stderr=buffer)
+        call_command("reclassify_transactions")
     except Exception:  # pragma: no cover - surface error message
         return redirect(f"{reverse('spaces:classification-rules')}?status=apply-error")
     return redirect(f"{reverse('spaces:classification-rules')}?status=applied")
@@ -562,8 +536,7 @@ def quick_classification_rule(request):
         if form.is_valid():
             rule = form.save(commit=False)
             if rule.position is None:
-                max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
-                rule.position = max_position + 1
+                rule.position = _next_rule_position()
             rule.save()
             trigger_payload = {
                 "ruleType": rule.rule_type,
@@ -572,14 +545,12 @@ def quick_classification_rule(request):
                 "applied": apply_rules_selected,
             }
             if apply_rules_selected:
-                buffer = io.StringIO()
-                call_command("reclassify_transactions", stdout=buffer, stderr=buffer)
+                call_command("reclassify_transactions")
             response = HttpResponse(status=204)
             response["HX-Trigger"] = json.dumps({"rule-created": trigger_payload})
             return response
     else:
-        max_position = ClassificationRule.objects.aggregate(Max("position"))["position__max"] or -1
-        initial = {"position": max_position + 1}
+        initial = {"position": _next_rule_position()}
         if request.GET.get("pattern"):
             initial["pattern"] = request.GET.get("pattern")
         if locked_rule_type:
@@ -719,8 +690,6 @@ def _resolve_time_window(request, default_days):
         end = _parse_reference_time(end_raw)
         if start is None or end is None:
             raise ValueError("Invalid date range provided")
-        start = _normalize_to_utc(start)
-        end = _normalize_to_utc(end)
         if end <= start:
             raise ValueError("end must be after start")
         seconds = (end - start).total_seconds()
@@ -732,8 +701,6 @@ def _resolve_time_window(request, default_days):
     reference = _parse_reference_time(request.GET.get("reference"))
     if reference is None:
         reference = datetime.now(timezone.utc)
-    else:
-        reference = _normalize_to_utc(reference)
     start = reference - timedelta(days=days)
     end = reference + timedelta(seconds=1)
     return start, end, days, reference
