@@ -27,4 +27,6 @@ jobs:
           DJANGO_SECRET_KEY: "not-used-by-this-command"
           DJANGO_ALLOWED_HOSTS: localhost
           DJANGO_DEBUG: "0"
+          DJANGO_DATABASE_PATH: "/tmp/not-used.sqlite3"
+          STARLING_SUMMARY_DAYS: "30"
         run: just salary-automation
