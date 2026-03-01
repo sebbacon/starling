@@ -200,6 +200,8 @@
     const cashflowDataEndpoint = "{% url 'spaces:cashflow-data' %}";
     const cashflowTransactionsEndpoint = "{% url 'spaces:cashflow-transactions' %}";
     const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const spendingPageBaseUrl = "{{ spending_page_url|escapejs }}";
+    const incomePageBaseUrl = "{{ income_page_url|escapejs }}";
     const summaryDaysDefault = {{ summary_days }};
     const transactionsPageSizeDefault = {{ transactions_page_size }};
 
@@ -276,6 +278,50 @@
         return value;
       }
       return parsed.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+    }
+
+    function parseMonthStart(value) {
+      const parsed = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime())) {
+        return null;
+      }
+      return parsed;
+    }
+
+    function monthExclusiveEnd(startDate) {
+      if (!startDate) {
+        return null;
+      }
+      const end = new Date(startDate.getTime());
+      end.setUTCMonth(end.getUTCMonth() + 1);
+      return end;
+    }
+
+    function handleChartClick(event) {
+      if (!chartInstance || !currentSummary?.dates?.length) {
+        return;
+      }
+      const points = chartInstance.getElementsAtEventForMode(
+        event,
+        'nearest',
+        { intersect: true },
+        false,
+      );
+      if (!points.length) {
+        return;
+      }
+      const [{ datasetIndex, index }] = points;
+      const targetBase = datasetIndex === 0 ? spendingPageBaseUrl : incomePageBaseUrl;
+      const monthKey = currentSummary.dates[index];
+      const startDate = parseMonthStart(monthKey);
+      const endDate = monthExclusiveEnd(startDate);
+      if (!targetBase || !startDate || !endDate) {
+        return;
+      }
+      const params = new URLSearchParams();
+      params.set('start', startDate.toISOString());
+      params.set('end', endDate.toISOString());
+      window.location.href = `${targetBase}?${params.toString()}`;
     }
 
     function renderChart(summary) {
@@ -676,6 +722,10 @@
           void loadTransactions(transactionsPaging.page + 1);
         }
       });
+      const chartCanvas = document.getElementById('cashflow-chart');
+      if (chartCanvas) {
+        chartCanvas.addEventListener('click', handleChartClick);
+      }
 
       try {
         await loadChartData();

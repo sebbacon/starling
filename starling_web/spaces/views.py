@@ -310,6 +310,8 @@ def cashflow(request):
             "summary_days": days,
             "category_options": _get_spending_category_options(),
             "transactions_page_size": TRANSACTIONS_PAGE_SIZE,
+            "spending_page_url": reverse("spaces:spending"),
+            "income_page_url": reverse("spaces:income"),
         },
     )
 

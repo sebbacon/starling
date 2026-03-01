@@ -87,6 +87,8 @@ def test_cashflow_page_renders():
     response = client.get(reverse("spaces:cashflow"))
     assert response.status_code == 200
     assert "Cashflow overview" in response.content.decode()
+    assert response.context["spending_page_url"] == reverse("spaces:spending")
+    assert response.context["income_page_url"] == reverse("spaces:income")
 
 
 def test_cashflow_data_returns_monthly_spending_and_income():
