@@ -1,5 +1,6 @@
 import json
 import math
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from django import forms
@@ -19,6 +20,7 @@ from starling_spaces.analytics import (
     summarise_category_totals,
     EXCLUDED_TRANSFER_SOURCES,
 )
+from starling_spaces.savings import calculate_savings_signals
 from starling_web.spaces.models import Category, ClassificationRule, FeedItem
 
 
@@ -40,6 +42,16 @@ CATEGORY_PERIODS = {
 }
 CATEGORY_DEFAULT_PERIOD = "past_month"
 TRANSACTIONS_PAGE_SIZE = 200
+SAVINGS_CONFIDENCE_MODES = {"high", "balanced", "broad"}
+SAVINGS_GROUPS = {"all", "subscriptions", "trends", "anomalies"}
+
+
+def _uncategorised_category_filter():
+    return (
+        Q(classified_category__isnull=True)
+        | Q(classified_category="")
+        | Q(classified_category__iexact="Uncategorised")
+    )
 
 
 def _iter_json_paths(data, prefix=None, array_limit=5):
@@ -316,6 +328,24 @@ def cashflow(request):
     )
 
 
+@require_GET
+def savings(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        _, _, days, _ = _resolve_time_window(request, default_days)
+    except ValueError:
+        days = default_days
+
+    return render(
+        request,
+        "spaces/savings.html",
+        {
+            "summary_days": days,
+            "data_endpoint": reverse("spaces:savings-data"),
+        },
+    )
+
+
 def _render_cashflow_page(request, *, template_name, base_view_name, category_name=None, counterparty_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -379,6 +409,10 @@ def income_data(request):
 
 @require_GET
 def cashflow_data(request):
+    income_scope = (request.GET.get("income_scope") or "salary").strip().lower()
+    if income_scope not in {"salary", "all"}:
+        return JsonResponse({"error": "Invalid income scope"}, status=400)
+
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
         window_start, window_end, days, reference = _resolve_time_window(request, default_days)
@@ -389,8 +423,43 @@ def cashflow_data(request):
         days=days,
         reference_time=reference,
         start_time=window_start,
+        income_scope=income_scope,
     )
     return JsonResponse(summary)
+
+
+@require_GET
+def savings_data(request):
+    confidence_mode = (request.GET.get("confidence") or "balanced").strip().lower()
+    if confidence_mode not in SAVINGS_CONFIDENCE_MODES:
+        return JsonResponse({"error": "Invalid confidence mode"}, status=400)
+
+    group = (request.GET.get("group") or "all").strip().lower()
+    if group not in SAVINGS_GROUPS:
+        return JsonResponse({"error": "Invalid group"}, status=400)
+
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    payload = calculate_savings_signals(
+        days=days,
+        reference_time=reference,
+        start_time=window_start,
+        confidence_mode=confidence_mode,
+        group=group,
+    )
+
+    for signal in payload["signals"]:
+        signal["drilldownUrl"] = _build_savings_drilldown_url(
+            signal=signal,
+            window_start=window_start,
+            window_end=window_end,
+        )
+
+    return JsonResponse(payload)
 
 
 @require_GET
@@ -406,7 +475,10 @@ def income_transactions(request):
 @require_GET
 def cashflow_transactions(request):
     flow = (request.GET.get("flow") or "both").strip().lower()
-    return _cashflow_transactions(request, flow=flow)
+    income_scope = (request.GET.get("income_scope") or "salary").strip().lower()
+    if income_scope not in {"salary", "all"}:
+        return JsonResponse({"error": "Invalid income scope"}, status=400)
+    return _cashflow_transactions(request, flow=flow, income_scope=income_scope)
 
 
 @require_GET
@@ -429,7 +501,7 @@ def things_to_do_transactions(request):
         return JsonResponse({"error": str(exc)}, status=400)
 
     queryset = (
-        FeedItem.objects.filter(Q(classified_category__isnull=True) | Q(classified_category=""))
+        FeedItem.objects.filter(_uncategorised_category_filter())
         .annotate(source_upper=Upper("source"))
         .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
         .order_by("-transaction_time", "-feed_item_uid")
@@ -480,9 +552,11 @@ def things_to_do_transactions(request):
     )
 
 
-def _cashflow_transactions(request, *, flow):
+def _cashflow_transactions(request, *, flow, income_scope="all"):
     if flow not in {"spending", "income", "both"}:
         return JsonResponse({"error": "Unsupported flow"}, status=400)
+    if income_scope not in {"salary", "all"}:
+        return JsonResponse({"error": "Unsupported income scope"}, status=400)
 
     category = request.GET.get("category")
     counterparty = request.GET.get("counterparty")
@@ -510,12 +584,19 @@ def _cashflow_transactions(request, *, flow):
     )
     if flow == "income":
         queryset = queryset.filter(amount_minor_units__gt=0)
+        if income_scope == "salary":
+            queryset = queryset.filter(classified_category__icontains="salary")
     elif flow == "spending":
         queryset = queryset.filter(amount_minor_units__lt=0)
+    elif income_scope == "salary":
+        queryset = queryset.filter(
+            Q(amount_minor_units__lt=0)
+            | (Q(amount_minor_units__gt=0) & Q(classified_category__icontains="salary"))
+        )
 
     if category:
         if category == "Uncategorised":
-            queryset = queryset.filter(classified_category__isnull=True)
+            queryset = queryset.filter(_uncategorised_category_filter())
         else:
             queryset = queryset.filter(classified_category=category)
 
@@ -572,6 +653,7 @@ def _cashflow_transactions(request, *, flow):
 
     response = {
         "flow": flow,
+        "incomeScope": income_scope,
         "reference": reference_time.isoformat(),
         "days": days,
         "start": window_start.isoformat(),
@@ -820,6 +902,28 @@ def _build_category_payload(summary, period_key):
         "total": round(total_value_minor / 100, 2),
         "months": months,
     }
+
+
+def _build_savings_drilldown_url(*, signal, window_start, window_end):
+    query = urlencode(
+        {
+            "start": window_start.isoformat(),
+            "end": window_end.isoformat(),
+        }
+    )
+
+    counterparty = (signal.get("counterparty") or "").strip()
+    if counterparty:
+        base = reverse("spaces:spending-counterparty", args=[counterparty])
+        return f"{base}?{query}"
+
+    category = (signal.get("category") or "").strip()
+    if category:
+        base = reverse("spaces:spending-category", args=[category])
+        return f"{base}?{query}"
+
+    base = reverse("spaces:spending")
+    return f"{base}?{query}"
 
 
 def _parse_positive_int(value, default):

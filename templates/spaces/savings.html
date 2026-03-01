@@ -1,0 +1,481 @@
+{% extends "base.html" %}
+
+{% block title %}Savings Signals{% endblock %}
+
+{% block content %}
+  <header>
+    <h1>Savings signals</h1>
+    <p>Automated opportunities to reduce spending based on recurring charges, trends, and unusual transactions.</p>
+  </header>
+
+  <style>
+    .savings-controls {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .savings-controls__left {
+      display: flex;
+      align-items: flex-end;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .savings-controls label {
+      display: block;
+      color: #334155;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+    .savings-controls select {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 0.4rem 0.6rem;
+      min-width: 180px;
+    }
+    .group-toggle {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+    }
+    .group-toggle button {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .group-toggle button.is-active {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
+    #refresh-signals {
+      border: none;
+      background: #0f766e;
+      color: #ffffff;
+      border-radius: 999px;
+      padding: 0.45rem 0.95rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    #refresh-signals:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .summary-card {
+      background: #f8fafc;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .summary-card__label {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .summary-card__value {
+      margin: 0.2rem 0 0;
+      color: #0f172a;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .opportunity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.75rem;
+    }
+    .opportunity-card {
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      background: #ffffff;
+    }
+    .opportunity-card h3 {
+      margin: 0 0 0.4rem;
+      font-size: 1rem;
+      color: #0f172a;
+    }
+    .opportunity-card p {
+      margin: 0 0 0.5rem;
+      color: #334155;
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+    .opportunity-meta {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      font-size: 0.82rem;
+      color: #475569;
+    }
+    .confidence-pill {
+      border-radius: 999px;
+      padding: 0.15rem 0.45rem;
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+    .confidence-pill.high {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .confidence-pill.medium {
+      background: #fef9c3;
+      color: #854d0e;
+    }
+    .confidence-pill.low {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .signals-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .signals-table th,
+    .signals-table td {
+      padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      vertical-align: top;
+    }
+    .signals-table th {
+      color: #334155;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .signals-table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .signals-table td a {
+      color: #0f766e;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .signals-table td a:hover {
+      text-decoration: underline;
+    }
+    .signal-title {
+      margin: 0 0 0.2rem;
+      color: #0f172a;
+      font-weight: 600;
+    }
+    .signal-description {
+      margin: 0;
+      color: #475569;
+      font-size: 0.87rem;
+    }
+    .empty-state {
+      margin: 0.5rem 0 0;
+      color: #64748b;
+    }
+  </style>
+
+  <section class="card">
+    <div class="savings-controls">
+      <div class="savings-controls__left">
+        <div>
+          <label for="confidence-mode">Signal style</label>
+          <select id="confidence-mode">
+            <option value="high">High confidence</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="broad">Broad coverage</option>
+          </select>
+        </div>
+        <div>
+          <label>Signal type</label>
+          <div class="group-toggle" id="signal-group-toggle" role="group" aria-label="Signal group">
+            <button type="button" data-group="all" class="is-active">All</button>
+            <button type="button" data-group="subscriptions">Subscriptions</button>
+            <button type="button" data-group="trends">Trends</button>
+            <button type="button" data-group="anomalies">Anomalies</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" id="refresh-signals">Refresh</button>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <p class="summary-card__label">Monthly opportunity</p>
+        <p class="summary-card__value" id="summary-monthly">£0.00</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Annual opportunity</p>
+        <p class="summary-card__value" id="summary-annual">£0.00</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Signals found</p>
+        <p class="summary-card__value" id="summary-count">0</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">High confidence</p>
+        <p class="summary-card__value" id="summary-high-confidence">0</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Top opportunities</h2>
+    <div id="top-opportunities" class="opportunity-grid"></div>
+    <p id="top-opportunities-empty" class="empty-state" hidden>No opportunities found for this filter.</p>
+  </section>
+
+  <section class="card">
+    <h2>All signals</h2>
+    <table class="signals-table">
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Opportunity</th>
+          <th scope="col">Confidence</th>
+          <th scope="col" class="numeric">Monthly</th>
+          <th scope="col" class="numeric">Annual</th>
+          <th scope="col">Action</th>
+        </tr>
+      </thead>
+      <tbody id="signals-table-body">
+        <tr><td colspan="6">Loading signals…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <script>
+    const savingsDataEndpoint = "{{ data_endpoint|escapejs }}";
+    const defaultDays = {{ summary_days }};
+    const confidenceSelect = document.getElementById('confidence-mode');
+    const groupToggle = document.getElementById('signal-group-toggle');
+    const refreshButton = document.getElementById('refresh-signals');
+    const topOpportunities = document.getElementById('top-opportunities');
+    const topOpportunitiesEmpty = document.getElementById('top-opportunities-empty');
+    const tableBody = document.getElementById('signals-table-body');
+    const summaryMonthly = document.getElementById('summary-monthly');
+    const summaryAnnual = document.getElementById('summary-annual');
+    const summaryCount = document.getElementById('summary-count');
+    const summaryHighConfidence = document.getElementById('summary-high-confidence');
+
+    let currentGroup = 'all';
+
+    function formatCurrencyFromMinor(valueMinor) {
+      const formatter = new Intl.NumberFormat('en-GB', {
+        style: 'currency',
+        currency: 'GBP',
+      });
+      return formatter.format((Number(valueMinor || 0)) / 100);
+    }
+
+    function confidenceClass(score) {
+      if (score >= 75) {
+        return 'high';
+      }
+      if (score >= 55) {
+        return 'medium';
+      }
+      return 'low';
+    }
+
+    function typeLabel(type) {
+      if (type === 'subscription') {
+        return 'Subscription';
+      }
+      if (type === 'trend') {
+        return 'Trend';
+      }
+      if (type === 'anomaly') {
+        return 'Anomaly';
+      }
+      return type;
+    }
+
+    function setLoadingState(isLoading) {
+      refreshButton.disabled = isLoading;
+      refreshButton.textContent = isLoading ? 'Refreshing…' : 'Refresh';
+    }
+
+    function buildRequestParams() {
+      const params = new URLSearchParams();
+      params.set('confidence', confidenceSelect.value || 'balanced');
+      params.set('group', currentGroup);
+      const incoming = new URLSearchParams(window.location.search);
+      if (incoming.get('start') && incoming.get('end')) {
+        params.set('start', incoming.get('start'));
+        params.set('end', incoming.get('end'));
+      } else if (incoming.get('days')) {
+        params.set('days', incoming.get('days'));
+      } else {
+        params.set('days', String(defaultDays));
+      }
+      if (incoming.get('reference')) {
+        params.set('reference', incoming.get('reference'));
+      }
+      return params;
+    }
+
+    function renderSummary(payload) {
+      const summary = payload.summary || {};
+      summaryMonthly.textContent = formatCurrencyFromMinor(summary.potentialMonthlySavingsMinor);
+      summaryAnnual.textContent = formatCurrencyFromMinor(summary.potentialAnnualSavingsMinor);
+      summaryCount.textContent = String(summary.signalsCount || 0);
+      summaryHighConfidence.textContent = String(summary.highConfidenceCount || 0);
+    }
+
+    function renderTopOpportunities(signals) {
+      topOpportunities.innerHTML = '';
+      const topSignals = signals.slice(0, 5);
+      if (!topSignals.length) {
+        topOpportunitiesEmpty.hidden = false;
+        return;
+      }
+      topOpportunitiesEmpty.hidden = true;
+      topSignals.forEach((signal) => {
+        const card = document.createElement('article');
+        card.className = 'opportunity-card';
+
+        const heading = document.createElement('h3');
+        heading.textContent = signal.title || 'Opportunity';
+        card.appendChild(heading);
+
+        const description = document.createElement('p');
+        description.textContent = signal.description || '';
+        card.appendChild(description);
+
+        const meta = document.createElement('div');
+        meta.className = 'opportunity-meta';
+
+        const confidence = document.createElement('span');
+        confidence.className = `confidence-pill ${confidenceClass(Number(signal.confidenceScore || 0))}`;
+        confidence.textContent = `${signal.confidenceScore || 0}% confidence`;
+        meta.appendChild(confidence);
+
+        const impact = document.createElement('span');
+        impact.textContent = `Monthly: ${formatCurrencyFromMinor(signal.impactMonthlyMinor)}`;
+        meta.appendChild(impact);
+
+        card.appendChild(meta);
+        topOpportunities.appendChild(card);
+      });
+    }
+
+    function renderSignalsTable(signals) {
+      tableBody.innerHTML = '';
+      if (!signals.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6;
+        cell.textContent = 'No savings signals were found for this filter.';
+        row.appendChild(cell);
+        tableBody.appendChild(row);
+        return;
+      }
+
+      signals.forEach((signal) => {
+        const row = document.createElement('tr');
+
+        const typeCell = document.createElement('td');
+        typeCell.textContent = typeLabel(signal.type);
+        row.appendChild(typeCell);
+
+        const titleCell = document.createElement('td');
+        const title = document.createElement('p');
+        title.className = 'signal-title';
+        title.textContent = signal.title || '';
+        titleCell.appendChild(title);
+        const description = document.createElement('p');
+        description.className = 'signal-description';
+        description.textContent = signal.description || '';
+        titleCell.appendChild(description);
+        row.appendChild(titleCell);
+
+        const confidenceCell = document.createElement('td');
+        const confidence = document.createElement('span');
+        confidence.className = `confidence-pill ${confidenceClass(Number(signal.confidenceScore || 0))}`;
+        confidence.textContent = `${signal.confidenceScore || 0}%`;
+        confidenceCell.appendChild(confidence);
+        row.appendChild(confidenceCell);
+
+        const monthlyCell = document.createElement('td');
+        monthlyCell.className = 'numeric';
+        monthlyCell.textContent = formatCurrencyFromMinor(signal.impactMonthlyMinor);
+        row.appendChild(monthlyCell);
+
+        const annualCell = document.createElement('td');
+        annualCell.className = 'numeric';
+        annualCell.textContent = formatCurrencyFromMinor(signal.impactAnnualMinor);
+        row.appendChild(annualCell);
+
+        const actionCell = document.createElement('td');
+        if (signal.drilldownUrl) {
+          const link = document.createElement('a');
+          link.href = signal.drilldownUrl;
+          link.textContent = 'Review transactions';
+          actionCell.appendChild(link);
+        } else {
+          actionCell.textContent = '—';
+        }
+        row.appendChild(actionCell);
+
+        tableBody.appendChild(row);
+      });
+    }
+
+    async function loadSignals() {
+      setLoadingState(true);
+      const params = buildRequestParams();
+      try {
+        const response = await fetch(`${savingsDataEndpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const payload = await response.json();
+        const signals = payload.signals || [];
+        renderSummary(payload);
+        renderTopOpportunities(signals);
+        renderSignalsTable(signals);
+      } catch (error) {
+        tableBody.innerHTML = '<tr><td colspan="6">Unable to load savings signals right now.</td></tr>';
+        topOpportunities.innerHTML = '';
+        topOpportunitiesEmpty.hidden = true;
+      } finally {
+        setLoadingState(false);
+      }
+    }
+
+    groupToggle.querySelectorAll('button[data-group]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const selected = button.dataset.group;
+        if (!selected || selected === currentGroup) {
+          return;
+        }
+        currentGroup = selected;
+        groupToggle.querySelectorAll('button[data-group]').forEach((item) => {
+          item.classList.toggle('is-active', item.dataset.group === currentGroup);
+        });
+        loadSignals();
+      });
+    });
+
+    confidenceSelect.addEventListener('change', loadSignals);
+    refreshButton.addEventListener('click', loadSignals);
+
+    document.addEventListener('DOMContentLoaded', loadSignals);
+  </script>
+{% endblock %}
