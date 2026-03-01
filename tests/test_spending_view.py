@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from django.test import Client
@@ -179,7 +179,7 @@ def test_spending_data_defaults_to_settings_window(settings):
     _seed_transactions()
     settings.STARLING_SUMMARY_DAYS = 120
     client = Client()
-    response = client.get(reverse("spaces:spending-data"))
+    response = client.get(reverse("spaces:spending-data"), {"reference": "2024-11-15T00:00:00Z"})
     assert response.status_code == 200
     payload = json.loads(response.content.decode())
     assert payload["series"]
@@ -256,6 +256,8 @@ def test_spending_transactions_can_filter_counterparty(settings):
         reverse("spaces:spending-transactions"),
         {
             "counterparty": "Merchant",
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
         },
     )
     assert response.status_code == 200
@@ -272,6 +274,8 @@ def test_spending_transactions_can_search_counterparty(settings):
         reverse("spaces:spending-transactions"),
         {
             "search": "Merchant",
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
         },
     )
     assert response.status_code == 200
@@ -287,6 +291,8 @@ def test_spending_transactions_can_search_amount(settings):
         reverse("spaces:spending-transactions"),
         {
             "search": "30",
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
         },
     )
     assert response.status_code == 200
@@ -335,10 +341,92 @@ def test_spending_transactions_recategorise_updates(settings):
     assert item.classification_reason == "manual"
 
 
-def test_spending_transactions_requires_filter():
+def test_spending_transactions_defaults_to_all_rows(settings):
+    _seed_transactions()
     client = Client()
-    response = client.get(reverse("spaces:spending-transactions"))
-    assert response.status_code == 400
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    ids = [item["feedItemUid"] for item in payload["transactions"]]
+    assert ids == ["item-main", "item-space"]
+    assert payload["count"] == 2
+    assert payload["totalCount"] == 2
+    assert payload["page"] == 1
+    assert payload["pageSize"] == 200
+    assert payload["totalPages"] == 1
+    assert payload["hasNextPage"] is False
+    assert payload["hasPreviousPage"] is False
+
+
+def test_spending_transactions_paginates_default_results(settings):
+    base_time = datetime(2024, 11, 15, 12, 0, tzinfo=timezone.utc)
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid=f"item-{index:03d}",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-(index + 1),
+                currency="GBP",
+                transaction_time=base_time - timedelta(minutes=index),
+                source="CARD",
+                counterparty=f"Merchant {index}",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            )
+            for index in range(205)
+        ]
+    )
+
+    client = Client()
+    page_one = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-16T00:00:00Z",
+        },
+    )
+    assert page_one.status_code == 200
+    page_one_payload = json.loads(page_one.content.decode())
+    assert page_one_payload["count"] == 200
+    assert page_one_payload["totalCount"] == 205
+    assert page_one_payload["page"] == 1
+    assert page_one_payload["pageSize"] == 200
+    assert page_one_payload["totalPages"] == 2
+    assert page_one_payload["hasNextPage"] is True
+    assert page_one_payload["hasPreviousPage"] is False
+    page_one_ids = [item["feedItemUid"] for item in page_one_payload["transactions"]]
+    assert page_one_ids[0] == "item-000"
+    assert page_one_ids[-1] == "item-199"
+
+    page_two = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-16T00:00:00Z",
+            "page": 2,
+        },
+    )
+    assert page_two.status_code == 200
+    page_two_payload = json.loads(page_two.content.decode())
+    assert page_two_payload["count"] == 5
+    assert page_two_payload["totalCount"] == 205
+    assert page_two_payload["page"] == 2
+    assert page_two_payload["totalPages"] == 2
+    assert page_two_payload["hasNextPage"] is False
+    assert page_two_payload["hasPreviousPage"] is True
+    page_two_ids = [item["feedItemUid"] for item in page_two_payload["transactions"]]
+    assert page_two_ids == ["item-200", "item-201", "item-202", "item-203", "item-204"]
 
 
 def test_spending_transactions_rejects_invalid_days():

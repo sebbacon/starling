@@ -9,8 +9,28 @@ EXCLUDED_TRANSFER_SOURCES = {"SAVINGS_GOAL", "INTERNAL_TRANSFER"}
 
 
 def calculate_spend_by_category(*, days: int, reference_time=None, start_time=None):
+    return _calculate_flow_by_category(
+        days=days,
+        reference_time=reference_time,
+        start_time=start_time,
+        flow="spending",
+    )
+
+
+def calculate_income_by_category(*, days: int, reference_time=None, start_time=None):
+    return _calculate_flow_by_category(
+        days=days,
+        reference_time=reference_time,
+        start_time=start_time,
+        flow="income",
+    )
+
+
+def _calculate_flow_by_category(*, days: int, reference_time=None, start_time=None, flow: str):
     if days <= 0:
         raise ValueError("days must be positive")
+    if flow not in {"spending", "income"}:
+        raise ValueError(f"Unsupported flow: {flow}")
 
     reference = reference_time or datetime.now(timezone.utc)
     if reference.tzinfo is None:
@@ -39,16 +59,23 @@ def calculate_spend_by_category(*, days: int, reference_time=None, start_time=No
         bucket = "month"
         format_period = lambda dt: dt.strftime("%Y-%m-%d")
 
+    if flow == "spending":
+        amount_filter = {"amount_minor_units__lt": 0}
+        amount_total_expression = -F("amount_minor_units")
+    else:
+        amount_filter = {"amount_minor_units__gt": 0}
+        amount_total_expression = F("amount_minor_units")
+
     qs = (
         FeedItem.objects.filter(
             transaction_time__gte=window_start,
             transaction_time__lt=window_end,
-            amount_minor_units__lt=0,
+            **amount_filter,
         )
         .annotate(period=trunc("transaction_time"), source_upper=Upper("source"))
         .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
         .values("period", "classified_category", "currency")
-        .annotate(total_minor=Sum(-F("amount_minor_units")))
+        .annotate(total_minor=Sum(amount_total_expression))
         .order_by("period", "classified_category")
     )
 

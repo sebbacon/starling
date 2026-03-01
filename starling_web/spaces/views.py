@@ -13,6 +13,7 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 from django.core.management import call_command
 
 from starling_spaces.analytics import (
+    calculate_income_by_category,
     calculate_spend_by_category,
     summarise_category_totals,
     EXCLUDED_TRANSFER_SOURCES,
@@ -37,6 +38,7 @@ CATEGORY_PERIODS = {
     "monthly_average": {"label": "Monthly average", "metric": "average"},
 }
 CATEGORY_DEFAULT_PERIOD = "past_month"
+TRANSACTIONS_PAGE_SIZE = 200
 
 
 def _iter_json_paths(data, prefix=None, array_limit=5):
@@ -272,6 +274,27 @@ def categories_data(request):
 
 @require_GET
 def spending(request, category_name=None, counterparty_name=None):
+    return _render_cashflow_page(
+        request,
+        template_name="spaces/spending.html",
+        base_view_name="spending",
+        category_name=category_name,
+        counterparty_name=counterparty_name,
+    )
+
+
+@require_GET
+def income(request, category_name=None, counterparty_name=None):
+    return _render_cashflow_page(
+        request,
+        template_name="spaces/income.html",
+        base_view_name="income",
+        category_name=category_name,
+        counterparty_name=counterparty_name,
+    )
+
+
+def _render_cashflow_page(request, *, template_name, base_view_name, category_name=None, counterparty_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
         _, _, days, _ = _resolve_time_window(request, default_days)
@@ -281,20 +304,21 @@ def spending(request, category_name=None, counterparty_name=None):
     search_query = (request.GET.get("search") or "").strip()
 
     category_options = _get_spending_category_options()
-    counterparty_template = reverse("spaces:spending-counterparty", args=["__counterparty__"])
+    counterparty_template = reverse(f"spaces:{base_view_name}-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
 
     return render(
         request,
-        "spaces/spending.html",
+        template_name,
         {
             "summary_days": days,
             "initial_category": category_name or "",
             "initial_counterparty": counterparty_name or "",
             "initial_search": search_query,
-            "base_spending_url": reverse("spaces:spending"),
+            "base_spending_url": reverse(f"spaces:{base_view_name}"),
             "counterparty_base_url": counterparty_base,
             "category_options": category_options,
+            "transactions_page_size": TRANSACTIONS_PAGE_SIZE,
         },
     )
 
@@ -316,13 +340,113 @@ def spending_data(request):
 
 
 @require_GET
+def income_data(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    summary = calculate_income_by_category(
+        days=days,
+        reference_time=reference,
+        start_time=window_start,
+    )
+    return JsonResponse(summary)
+
+
+@require_GET
 def spending_transactions(request):
+    return _cashflow_transactions(request, flow="spending")
+
+
+@require_GET
+def income_transactions(request):
+    return _cashflow_transactions(request, flow="income")
+
+
+@require_GET
+def things_to_do(request):
+    return render(
+        request,
+        "spaces/things_to_do.html",
+        {
+            "category_options": _get_spending_category_options(),
+            "transactions_page_size": TRANSACTIONS_PAGE_SIZE,
+        },
+    )
+
+
+@require_GET
+def things_to_do_transactions(request):
+    try:
+        page = _parse_positive_int(request.GET.get("page"), 1)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    queryset = (
+        FeedItem.objects.filter(Q(classified_category__isnull=True) | Q(classified_category=""))
+        .annotate(source_upper=Upper("source"))
+        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+        .order_by("-transaction_time", "-feed_item_uid")
+    )
+
+    total_count = queryset.count()
+    total_pages = max(1, math.ceil(total_count / TRANSACTIONS_PAGE_SIZE))
+    if page > total_pages:
+        return JsonResponse({"error": "page is out of range"}, status=400)
+    page_start = (page - 1) * TRANSACTIONS_PAGE_SIZE
+    page_end = page_start + TRANSACTIONS_PAGE_SIZE
+
+    space_names = {
+        (cat.account_uid, cat.category_uid): cat.name
+        for cat in Category.objects.filter(category_type="space")
+    }
+
+    transactions = []
+    for item in queryset[page_start:page_end]:
+        space_name = space_names.get((item.account_uid, item.space_uid))
+        transactions.append(
+            {
+                "feedItemUid": item.feed_item_uid,
+                "transactionTime": item.transaction_time.isoformat(),
+                "counterparty": item.counterparty or "",
+                "amountMinorUnits": int(-item.amount_minor_units),
+                "currency": item.currency or "GBP",
+                "spaceUid": item.space_uid or "",
+                "spaceName": space_name or "",
+                "source": item.source or "",
+                "classificationReason": item.classification_reason or "",
+                "category": "Uncategorised",
+                "raw": item.raw_json or {},
+            }
+        )
+
+    return JsonResponse(
+        {
+            "count": len(transactions),
+            "totalCount": total_count,
+            "page": page,
+            "pageSize": TRANSACTIONS_PAGE_SIZE,
+            "totalPages": total_pages,
+            "hasNextPage": page < total_pages,
+            "hasPreviousPage": page > 1,
+            "transactions": transactions,
+        }
+    )
+
+
+def _cashflow_transactions(request, *, flow):
+    if flow not in {"spending", "income"}:
+        return JsonResponse({"error": "Unsupported flow"}, status=400)
+
     category = request.GET.get("category")
     counterparty = request.GET.get("counterparty")
     search = (request.GET.get("search") or "").strip()
-    if not category and not counterparty:
-        if not search:
-            return JsonResponse({"error": "category, counterparty, or search is required"}, status=400)
+    try:
+        page = _parse_positive_int(request.GET.get("page"), 1)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
 
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -338,11 +462,14 @@ def spending_transactions(request):
         )
         .annotate(source_upper=Upper("source"))
         .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
-        .order_by("-transaction_time")
+        .order_by("-transaction_time", "-feed_item_uid")
     )
+    if flow == "income":
+        queryset = queryset.filter(amount_minor_units__gt=0)
+    else:
+        queryset = queryset.filter(amount_minor_units__lt=0)
 
     if category:
-        queryset = queryset.filter(amount_minor_units__lt=0)
         if category == "Uncategorised":
             queryset = queryset.filter(classified_category__isnull=True)
         else:
@@ -355,8 +482,18 @@ def spending_transactions(request):
         amount_minor = _parse_amount_minor_units(search)
         search_filter = Q(counterparty__icontains=search)
         if amount_minor is not None:
-            search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
+            if flow == "spending":
+                search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
+            else:
+                search_filter |= Q(amount_minor_units=amount_minor)
         queryset = queryset.filter(search_filter)
+
+    total_count = queryset.count()
+    total_pages = max(1, math.ceil(total_count / TRANSACTIONS_PAGE_SIZE))
+    if page > total_pages:
+        return JsonResponse({"error": "page is out of range"}, status=400)
+    page_start = (page - 1) * TRANSACTIONS_PAGE_SIZE
+    page_end = page_start + TRANSACTIONS_PAGE_SIZE
 
     space_names = {
         (cat.account_uid, cat.category_uid): cat.name
@@ -364,14 +501,14 @@ def spending_transactions(request):
     }
 
     transactions = []
-    for item in queryset:
+    for item in queryset[page_start:page_end]:
         space_name = space_names.get((item.account_uid, item.space_uid))
         transactions.append(
             {
                 "feedItemUid": item.feed_item_uid,
                 "transactionTime": item.transaction_time.isoformat(),
                 "counterparty": item.counterparty or "",
-                "amountMinorUnits": int(-item.amount_minor_units),
+                "amountMinorUnits": int(-item.amount_minor_units if flow == "spending" else item.amount_minor_units),
                 "currency": item.currency or "GBP",
                 "spaceUid": item.space_uid or "",
                 "spaceName": space_name or "",
@@ -388,6 +525,12 @@ def spending_transactions(request):
         "start": window_start.isoformat(),
         "end": window_end.isoformat(),
         "count": len(transactions),
+        "totalCount": total_count,
+        "page": page,
+        "pageSize": TRANSACTIONS_PAGE_SIZE,
+        "totalPages": total_pages,
+        "hasNextPage": page < total_pages,
+        "hasPreviousPage": page > 1,
         "transactions": transactions,
     }
     if category:

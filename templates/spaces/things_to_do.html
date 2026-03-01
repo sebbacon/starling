@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+
+{% block title %}Things To Do{% endblock %}
+
+{% block content %}
+  <header>
+    <h1>Things to do</h1>
+    <p>Review uncategorised transactions and bulk recategorise them.</p>
+  </header>
+
+  <style>
+    #transaction-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #transaction-table th,
+    #transaction-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid #e1e6ef;
+      text-align: left;
+    }
+    #transaction-table td.numeric {
+      text-align: right;
+    }
+    #transaction-table tbody tr:hover {
+      background: #f5f8ff;
+    }
+    #transaction-table th.select-col,
+    #transaction-table td.select-col {
+      width: 2.5rem;
+      text-align: center;
+    }
+    #transaction-table th.select-col input,
+    #transaction-table td.select-col input {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .transactions-pagination {
+      margin-top: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .transactions-pagination button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #2f3c52;
+      background: transparent;
+      color: #2f3c52;
+      cursor: pointer;
+    }
+    .transactions-pagination button:hover:not(:disabled) {
+      background: #2f3c52;
+      color: #fff;
+    }
+    .transactions-pagination button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .transactions-page-info {
+      color: #334155;
+      min-width: 15ch;
+      text-align: center;
+    }
+    .transaction-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .transaction-actions form {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .transaction-actions select {
+      border: 1px solid #2f3c52;
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      min-width: 180px;
+      background: #fff;
+      color: #111827;
+    }
+    .transaction-actions button {
+      padding: 0.35rem 0.85rem;
+      border-radius: 6px;
+      border: none;
+      background: #34d399;
+      color: #101215;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .transaction-actions button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .transaction-actions .status {
+      min-height: 1.2rem;
+      color: #64748b;
+    }
+  </style>
+
+  <section class="card">
+    <h2 id="transactions-title">Uncategorised transactions</h2>
+    <table id="transaction-table">
+      <thead>
+        <tr>
+          <th scope="col" class="select-col">
+            <input type="checkbox" id="select-all-transactions" aria-label="Select all transactions" />
+          </th>
+          <th scope="col" data-sort-key="transactionTime" aria-sort="descending">Date</th>
+          <th scope="col" data-sort-key="category" aria-sort="none">Category</th>
+          <th scope="col" data-sort-key="counterparty" aria-sort="none">Counterparty</th>
+          <th scope="col" data-sort-key="spaceName" aria-sort="none">Space</th>
+          <th scope="col" data-sort-key="source" aria-sort="none">Source</th>
+          <th scope="col" class="numeric" data-sort-key="amountMinorUnits" aria-sort="none">Amount</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="transactions-pagination" id="transactions-pagination" hidden>
+      <button type="button" id="transactions-prev-page">Previous</button>
+      <span class="transactions-page-info" id="transactions-page-info"></span>
+      <button type="button" id="transactions-next-page">Next</button>
+    </div>
+    <div class="transaction-actions">
+      <form id="recategorise-form">
+        <label for="recategorise-category">Recategorise selected to</label>
+        <select id="recategorise-category" name="category">
+          {% for option in category_options %}
+            <option value="{{ option|escape }}">{{ option }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" id="recategorise-submit" disabled>Recategorise</button>
+        <span class="status" id="recategorise-status" role="status" aria-live="polite"></span>
+      </form>
+    </div>
+  </section>
+
+  <script>
+    const transactionsEndpoint = "{% url 'spaces:things-to-do-transactions' %}";
+    const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const transactionsTitle = document.getElementById('transactions-title');
+    const transactionsPagination = document.getElementById('transactions-pagination');
+    const transactionsPrevPage = document.getElementById('transactions-prev-page');
+    const transactionsNextPage = document.getElementById('transactions-next-page');
+    const transactionsPageInfo = document.getElementById('transactions-page-info');
+    const selectAllCheckbox = document.getElementById('select-all-transactions');
+    const recategoriseForm = document.getElementById('recategorise-form');
+    const recategoriseCategory = document.getElementById('recategorise-category');
+    const recategoriseButton = document.getElementById('recategorise-submit');
+    const recategoriseStatus = document.getElementById('recategorise-status');
+
+    let currentTransactions = [];
+    let currentTransactionsMessage = null;
+    const selectedTransactionIds = new Set();
+    const sortState = { column: 'transactionTime', direction: 'desc' };
+    const transactionsPaging = {
+      page: 1,
+      pageSize: {{ transactions_page_size }},
+      totalCount: 0,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    };
+
+    function getCookie(name) {
+      const cookieString = document.cookie || '';
+      if (!cookieString) {
+        return null;
+      }
+      const cookies = cookieString.split('; ');
+      for (let i = 0; i < cookies.length; i += 1) {
+        const [key, ...rest] = cookies[i].split('=');
+        if (key === name) {
+          return decodeURIComponent(rest.join('='));
+        }
+      }
+      return null;
+    }
+
+    function updateSelectionControls() {
+      const visibleIds = new Set(currentTransactions.map((txn) => txn.feedItemUid));
+      let selectedVisibleCount = 0;
+      selectedTransactionIds.forEach((id) => {
+        if (visibleIds.has(id)) {
+          selectedVisibleCount += 1;
+        }
+      });
+      const totalVisible = currentTransactions.length;
+      if (!totalVisible) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+      } else {
+        selectAllCheckbox.checked = selectedVisibleCount === totalVisible && totalVisible > 0;
+        selectAllCheckbox.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < totalVisible;
+      }
+      recategoriseButton.disabled = selectedVisibleCount === 0;
+    }
+
+    function updatePaginationControls() {
+      if (!transactionsPagination || !transactionsPrevPage || !transactionsNextPage || !transactionsPageInfo) {
+        return;
+      }
+      if (currentTransactionsMessage || transactionsPaging.totalPages <= 1) {
+        transactionsPagination.hidden = true;
+        transactionsPrevPage.disabled = true;
+        transactionsNextPage.disabled = true;
+        transactionsPageInfo.textContent = '';
+        return;
+      }
+      transactionsPagination.hidden = false;
+      transactionsPrevPage.disabled = !transactionsPaging.hasPreviousPage;
+      transactionsNextPage.disabled = !transactionsPaging.hasNextPage;
+      transactionsPageInfo.textContent = `Page ${transactionsPaging.page} of ${transactionsPaging.totalPages} (${transactionsPaging.totalCount})`;
+    }
+
+    function sortTransactions(data) {
+      const { column, direction } = sortState;
+      const sorted = [...data];
+      sorted.sort((a, b) => {
+        let result = 0;
+        if (column === 'transactionTime') {
+          result = new Date(a[column]).getTime() - new Date(b[column]).getTime();
+        } else if (column === 'amountMinorUnits') {
+          result = (a[column] || 0) - (b[column] || 0);
+        } else {
+          result = (a[column] || '').localeCompare(b[column] || '', undefined, { sensitivity: 'base' });
+        }
+        return direction === 'asc' ? result : -result;
+      });
+      return sorted;
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        if (currentTransactionsMessage) {
+          th.setAttribute('aria-sort', 'none');
+          return;
+        }
+        const key = th.dataset.sortKey;
+        if (key === sortState.column) {
+          th.setAttribute('aria-sort', sortState.direction === 'asc' ? 'ascending' : 'descending');
+        } else {
+          th.setAttribute('aria-sort', 'none');
+        }
+      });
+    }
+
+    function renderTransactionsTable() {
+      const tbody = document.querySelector('#transaction-table tbody');
+      tbody.innerHTML = '';
+
+      if (currentTransactionsMessage) {
+        selectedTransactionIds.clear();
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 7;
+        cell.textContent = currentTransactionsMessage;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        updateSelectionControls();
+        updatePaginationControls();
+        updateSortIndicators();
+        return;
+      }
+
+      if (!currentTransactions.length) {
+        selectedTransactionIds.clear();
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 7;
+        cell.textContent = 'No uncategorised transactions found.';
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        updateSelectionControls();
+        updatePaginationControls();
+        updateSortIndicators();
+        return;
+      }
+
+      const sorted = sortTransactions(currentTransactions);
+      const visibleIdSet = new Set(sorted.map((txn) => txn.feedItemUid));
+      Array.from(selectedTransactionIds).forEach((id) => {
+        if (!visibleIdSet.has(id)) {
+          selectedTransactionIds.delete(id);
+        }
+      });
+
+      sorted.forEach((txn) => {
+        const row = document.createElement('tr');
+
+        const selectCell = document.createElement('td');
+        selectCell.classList.add('select-col');
+        const selectBox = document.createElement('input');
+        selectBox.type = 'checkbox';
+        selectBox.checked = selectedTransactionIds.has(txn.feedItemUid);
+        selectBox.addEventListener('change', (event) => {
+          if (event.target.checked) {
+            selectedTransactionIds.add(txn.feedItemUid);
+          } else {
+            selectedTransactionIds.delete(txn.feedItemUid);
+          }
+          recategoriseStatus.textContent = '';
+          updateSelectionControls();
+        });
+        selectCell.appendChild(selectBox);
+        row.appendChild(selectCell);
+
+        const dateCell = document.createElement('td');
+        dateCell.textContent = new Date(txn.transactionTime).toLocaleString('en-GB', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        });
+        row.appendChild(dateCell);
+
+        const categoryCell = document.createElement('td');
+        categoryCell.textContent = txn.category || 'Uncategorised';
+        row.appendChild(categoryCell);
+
+        const counterpartyCell = document.createElement('td');
+        counterpartyCell.textContent = txn.counterparty || '—';
+        row.appendChild(counterpartyCell);
+
+        const spaceCell = document.createElement('td');
+        spaceCell.textContent = txn.spaceName || txn.spaceUid || '—';
+        row.appendChild(spaceCell);
+
+        const sourceCell = document.createElement('td');
+        sourceCell.textContent = txn.source || '—';
+        row.appendChild(sourceCell);
+
+        const amountCell = document.createElement('td');
+        amountCell.classList.add('numeric');
+        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
+        amountCell.textContent = formatter.format((txn.amountMinorUnits || 0) / 100);
+        row.appendChild(amountCell);
+
+        tbody.appendChild(row);
+      });
+
+      updateSelectionControls();
+      updatePaginationControls();
+      updateSortIndicators();
+    }
+
+    async function loadTransactions(page = 1) {
+      currentTransactions = [];
+      currentTransactionsMessage = 'Loading…';
+      transactionsPaging.page = page;
+      renderTransactionsTable();
+
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+
+      try {
+        const response = await fetch(`${transactionsEndpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch transactions');
+        }
+        const payload = await response.json();
+        currentTransactions = payload.transactions || [];
+        currentTransactionsMessage = null;
+        transactionsPaging.page = Number(payload.page || page);
+        transactionsPaging.pageSize = Number(payload.pageSize || transactionsPaging.pageSize);
+        transactionsPaging.totalCount = Number(payload.totalCount || 0);
+        transactionsPaging.totalPages = Number(payload.totalPages || 1);
+        transactionsPaging.hasNextPage = Boolean(payload.hasNextPage);
+        transactionsPaging.hasPreviousPage = Boolean(payload.hasPreviousPage);
+        transactionsTitle.textContent = `Uncategorised transactions (${transactionsPaging.totalCount})`;
+        renderTransactionsTable();
+      } catch (error) {
+        currentTransactions = [];
+        currentTransactionsMessage = 'Unable to load transactions. Please try again.';
+        selectedTransactionIds.clear();
+        renderTransactionsTable();
+      }
+    }
+
+    async function handleRecategoriseSubmit(event) {
+      event.preventDefault();
+      if (!selectedTransactionIds.size) {
+        return;
+      }
+      const targetCategory = (recategoriseCategory.value || '').trim();
+      if (!targetCategory) {
+        recategoriseStatus.textContent = 'Choose a category first.';
+        return;
+      }
+      const csrfToken = getCookie('csrftoken');
+      if (!csrfToken) {
+        recategoriseStatus.textContent = 'Unable to determine CSRF token.';
+        return;
+      }
+      recategoriseButton.disabled = true;
+      recategoriseButton.textContent = 'Recategorising…';
+      recategoriseStatus.textContent = '';
+      try {
+        const response = await fetch(transactionsRecategoriseEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({
+            feedItemUids: Array.from(selectedTransactionIds),
+            category: targetCategory,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error('Failed to recategorise transactions');
+        }
+        const payload = await response.json();
+        selectedTransactionIds.clear();
+        recategoriseStatus.textContent = `Updated ${payload.updated || 0} transaction${payload.updated === 1 ? '' : 's'}.`;
+        await loadTransactions(transactionsPaging.page);
+      } catch (error) {
+        recategoriseStatus.textContent = 'Unable to recategorise transactions. Please try again.';
+      } finally {
+        recategoriseButton.textContent = 'Recategorise';
+        updateSelectionControls();
+      }
+    }
+
+    function handleSortClick(event) {
+      const key = event.currentTarget.dataset.sortKey;
+      if (!key || currentTransactionsMessage) {
+        return;
+      }
+      if (sortState.column === key) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortState.column = key;
+        sortState.direction = key === 'transactionTime' ? 'desc' : 'asc';
+      }
+      renderTransactionsTable();
+    }
+
+    function handleSelectAllChange(event) {
+      if (!currentTransactions.length) {
+        event.target.checked = false;
+        event.target.indeterminate = false;
+        return;
+      }
+      if (event.target.checked) {
+        currentTransactions.forEach((txn) => {
+          selectedTransactionIds.add(txn.feedItemUid);
+        });
+      } else {
+        currentTransactions.forEach((txn) => {
+          selectedTransactionIds.delete(txn.feedItemUid);
+        });
+        event.target.indeterminate = false;
+      }
+      recategoriseStatus.textContent = '';
+      renderTransactionsTable();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      selectAllCheckbox.addEventListener('change', handleSelectAllChange);
+      recategoriseForm.addEventListener('submit', handleRecategoriseSubmit);
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        th.addEventListener('click', handleSortClick);
+      });
+      transactionsPrevPage.addEventListener('click', () => {
+        if (transactionsPaging.hasPreviousPage) {
+          void loadTransactions(transactionsPaging.page - 1);
+        }
+      });
+      transactionsNextPage.addEventListener('click', () => {
+        if (transactionsPaging.hasNextPage) {
+          void loadTransactions(transactionsPaging.page + 1);
+        }
+      });
+      void loadTransactions(1);
+    });
+  </script>
+{% endblock %}

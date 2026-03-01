@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Spending Overview{% endblock %}
+{% block title %}Income Overview{% endblock %}
 
 {% block content %}
   <header>
-    <h1>Spending Overview</h1>
-    <p>Stacked view of actual spend grouped by category over the last {{ summary_days }} days.</p>
+    <h1>Income Overview</h1>
+    <p>Stacked view of income received grouped by category over the last {{ summary_days }} days.</p>
   </header>
 
   <style>
@@ -394,9 +394,9 @@
     ];
     const colorAssignments = new Map();
 
-    const spendingDataEndpoint = "{% url 'spaces:spending-data' %}";
-    const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
-    const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const spendingDataEndpoint = "{% url 'spaces:income-data' %}";
+    const transactionsEndpoint = "{% url 'spaces:income-transactions' %}";
+    const transactionsRecategoriseEndpoint = "{% url 'spaces:income-recategorise' %}";
     const rulesPageBase = "{% url 'spaces:classification-rules' %}";
     const quickRuleEndpoint = "{% url 'spaces:classification-rules-quick' %}";
     const summaryDaysDefault = {{ summary_days }};
@@ -1243,7 +1243,7 @@
           labels: [...overviewSummary.dates],
           datasets: [
             {
-              label: 'Total spend',
+              label: 'Total income',
               data,
               borderColor: '#34d399',
               backgroundColor: 'rgba(52, 211, 153, 0.15)',
