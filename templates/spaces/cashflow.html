@@ -1,0 +1,690 @@
+{% extends "base.html" %}
+
+{% block title %}Cashflow Overview{% endblock %}
+
+{% block content %}
+  <header>
+    <h1>Cashflow overview</h1>
+    <p>Compare monthly spending and income, then review matching transactions below.</p>
+  </header>
+
+  <style>
+    .flow-toggle {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .flow-toggle button {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 0.35rem 0.85rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .flow-toggle button.is-active {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
+    .chart-wrap {
+      min-height: 320px;
+      height: 360px;
+    }
+    .chart-wrap canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
+    #transaction-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #transaction-table th,
+    #transaction-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid #e1e6ef;
+      text-align: left;
+    }
+    #transaction-table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #transaction-table tbody tr:hover {
+      background: #f5f8ff;
+    }
+    #transaction-table th.select-col,
+    #transaction-table td.select-col {
+      width: 2.5rem;
+      text-align: center;
+    }
+    #transaction-table th.select-col input,
+    #transaction-table td.select-col input {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .amount-income {
+      color: #0f766e;
+      font-weight: 600;
+    }
+    .amount-spending {
+      color: #b91c1c;
+      font-weight: 600;
+    }
+    .transactions-pagination {
+      margin-top: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .transactions-pagination button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      background: transparent;
+      color: #2f3c52;
+      cursor: pointer;
+    }
+    .transactions-pagination button:hover:not(:disabled) {
+      background: #2f3c52;
+      color: #fff;
+    }
+    .transactions-pagination button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .transactions-page-info {
+      color: #334155;
+      min-width: 15ch;
+      text-align: center;
+    }
+    .transaction-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .transaction-actions form {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .transaction-actions label {
+      color: #334155;
+    }
+    .transaction-actions select {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      color: #0f172a;
+      padding: 0.35rem 0.75rem;
+      min-width: 180px;
+    }
+    .transaction-actions button {
+      padding: 0.35rem 0.85rem;
+      border-radius: 6px;
+      border: none;
+      background: #34d399;
+      color: #101215;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .transaction-actions button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .transaction-actions .status {
+      min-height: 1.2rem;
+      color: #64748b;
+    }
+  </style>
+
+  <section class="card">
+    <div class="flow-toggle" id="flow-toggle" role="group" aria-label="Cashflow filter">
+      <button type="button" data-flow="both" class="is-active">Both</button>
+      <button type="button" data-flow="spending">Spending</button>
+      <button type="button" data-flow="income">Income</button>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="cashflow-chart"></canvas>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 id="transactions-title">Transactions</h2>
+    <table id="transaction-table">
+      <thead>
+        <tr>
+          <th scope="col" class="select-col">
+            <input type="checkbox" id="select-all-transactions" aria-label="Select all transactions" />
+          </th>
+          <th scope="col" data-sort-key="transactionTime" aria-sort="descending">Date</th>
+          <th scope="col" data-sort-key="category" aria-sort="none">Category</th>
+          <th scope="col" data-sort-key="counterparty" aria-sort="none">Counterparty</th>
+          <th scope="col" data-sort-key="spaceName" aria-sort="none">Space</th>
+          <th scope="col" data-sort-key="source" aria-sort="none">Source</th>
+          <th scope="col" class="numeric" data-sort-key="amountMinorUnits" aria-sort="none">Amount</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="transactions-pagination" id="transactions-pagination" hidden>
+      <button type="button" id="transactions-prev-page">Previous</button>
+      <span class="transactions-page-info" id="transactions-page-info"></span>
+      <button type="button" id="transactions-next-page">Next</button>
+    </div>
+    <div class="transaction-actions">
+      <form id="recategorise-form">
+        <label for="recategorise-category">Recategorise selected to</label>
+        <select id="recategorise-category" name="category">
+          {% for option in category_options %}
+            <option value="{{ option|escape }}">{{ option }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" id="recategorise-submit" disabled>Recategorise</button>
+        <span class="status" id="recategorise-status" role="status" aria-live="polite"></span>
+      </form>
+    </div>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script>
+    const cashflowDataEndpoint = "{% url 'spaces:cashflow-data' %}";
+    const cashflowTransactionsEndpoint = "{% url 'spaces:cashflow-transactions' %}";
+    const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const summaryDaysDefault = {{ summary_days }};
+    const transactionsPageSizeDefault = {{ transactions_page_size }};
+
+    const flowToggle = document.getElementById('flow-toggle');
+    const transactionsTitle = document.getElementById('transactions-title');
+    const transactionsPagination = document.getElementById('transactions-pagination');
+    const transactionsPrevPage = document.getElementById('transactions-prev-page');
+    const transactionsNextPage = document.getElementById('transactions-next-page');
+    const transactionsPageInfo = document.getElementById('transactions-page-info');
+    const selectAllCheckbox = document.getElementById('select-all-transactions');
+    const recategoriseForm = document.getElementById('recategorise-form');
+    const recategoriseCategory = document.getElementById('recategorise-category');
+    const recategoriseButton = document.getElementById('recategorise-submit');
+    const recategoriseStatus = document.getElementById('recategorise-status');
+
+    let currentFlow = 'both';
+    let chartInstance = null;
+    let currentSummary = null;
+    let currentTransactions = [];
+    let currentTransactionsMessage = null;
+    const selectedTransactionIds = new Set();
+    const sortState = { column: 'transactionTime', direction: 'desc' };
+    const transactionsPaging = {
+      page: 1,
+      pageSize: transactionsPageSizeDefault,
+      totalCount: 0,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    };
+
+    function getCookie(name) {
+      const cookieString = document.cookie || '';
+      if (!cookieString) {
+        return null;
+      }
+      const cookies = cookieString.split('; ');
+      for (let i = 0; i < cookies.length; i += 1) {
+        const [key, ...rest] = cookies[i].split('=');
+        if (key === name) {
+          return decodeURIComponent(rest.join('='));
+        }
+      }
+      return null;
+    }
+
+    function resetTransactionsPaging(page = 1) {
+      transactionsPaging.page = page;
+      transactionsPaging.pageSize = transactionsPageSizeDefault;
+      transactionsPaging.totalCount = 0;
+      transactionsPaging.totalPages = 1;
+      transactionsPaging.hasNextPage = false;
+      transactionsPaging.hasPreviousPage = false;
+    }
+
+    function setTransactionsPagingFromPayload(payload, fallbackPage = 1) {
+      transactionsPaging.page = Number(payload.page || fallbackPage || 1);
+      transactionsPaging.pageSize = Number(payload.pageSize || transactionsPageSizeDefault);
+      transactionsPaging.totalCount = Number(payload.totalCount || 0);
+      transactionsPaging.totalPages = Number(payload.totalPages || 1);
+      transactionsPaging.hasNextPage = Boolean(payload.hasNextPage);
+      transactionsPaging.hasPreviousPage = Boolean(payload.hasPreviousPage);
+    }
+
+    function setActiveFlowButton(flow) {
+      Array.from(flowToggle.querySelectorAll('button[data-flow]')).forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.flow === flow);
+      });
+    }
+
+    function formatMonthLabel(value) {
+      const parsed = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime())) {
+        return value;
+      }
+      return parsed.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+    }
+
+    function renderChart(summary) {
+      const chartCanvas = document.getElementById('cashflow-chart');
+      if (!chartCanvas) {
+        return;
+      }
+      const labels = (summary?.dates || []).map(formatMonthLabel);
+      const chartData = {
+        labels,
+        datasets: [
+          {
+            label: 'Spending',
+            data: summary?.spendingValues || [],
+            backgroundColor: 'rgba(185, 28, 28, 0.7)',
+            borderColor: '#b91c1c',
+            borderWidth: 1,
+          },
+          {
+            label: 'Income',
+            data: summary?.incomeValues || [],
+            backgroundColor: 'rgba(15, 118, 110, 0.7)',
+            borderColor: '#0f766e',
+            borderWidth: 1,
+          },
+        ],
+      };
+
+      const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { stacked: false },
+          y: {
+            stacked: false,
+            ticks: {
+              callback: function(value) {
+                const formatter = new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'GBP',
+                  maximumFractionDigits: 0,
+                });
+                return formatter.format(value);
+              },
+            },
+          },
+        },
+      };
+
+      if (chartInstance) {
+        chartInstance.data = chartData;
+        chartInstance.options = options;
+        chartInstance.update();
+      } else {
+        chartInstance = new Chart(chartCanvas.getContext('2d'), {
+          type: 'bar',
+          data: chartData,
+          options,
+        });
+      }
+      applyChartToggle();
+    }
+
+    function applyChartToggle() {
+      if (!chartInstance) {
+        return;
+      }
+      chartInstance.data.datasets[0].hidden = currentFlow === 'income';
+      chartInstance.data.datasets[1].hidden = currentFlow === 'spending';
+      chartInstance.update();
+    }
+
+    async function loadChartData() {
+      const query = new URLSearchParams();
+      query.set('days', String(summaryDaysDefault));
+      const response = await fetch(`${cashflowDataEndpoint}?${query.toString()}`);
+      if (!response.ok) {
+        throw new Error('Unable to load cashflow data');
+      }
+      currentSummary = await response.json();
+      renderChart(currentSummary);
+    }
+
+    function updateSelectionControls() {
+      const visibleIds = new Set(currentTransactions.map((txn) => txn.feedItemUid));
+      let selectedVisibleCount = 0;
+      selectedTransactionIds.forEach((id) => {
+        if (visibleIds.has(id)) {
+          selectedVisibleCount += 1;
+        }
+      });
+      const totalVisible = currentTransactions.length;
+      if (!totalVisible) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+      } else {
+        selectAllCheckbox.checked = selectedVisibleCount === totalVisible && totalVisible > 0;
+        selectAllCheckbox.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < totalVisible;
+      }
+      recategoriseButton.disabled = selectedVisibleCount === 0;
+    }
+
+    function updatePaginationControls() {
+      if (!transactionsPagination || !transactionsPrevPage || !transactionsNextPage || !transactionsPageInfo) {
+        return;
+      }
+      if (currentTransactionsMessage || transactionsPaging.totalPages <= 1) {
+        transactionsPagination.hidden = true;
+        transactionsPrevPage.disabled = true;
+        transactionsNextPage.disabled = true;
+        transactionsPageInfo.textContent = '';
+        return;
+      }
+      transactionsPagination.hidden = false;
+      transactionsPrevPage.disabled = !transactionsPaging.hasPreviousPage;
+      transactionsNextPage.disabled = !transactionsPaging.hasNextPage;
+      transactionsPageInfo.textContent = `Page ${transactionsPaging.page} of ${transactionsPaging.totalPages} (${transactionsPaging.totalCount})`;
+    }
+
+    function sortTransactions(data) {
+      const { column, direction } = sortState;
+      const sorted = [...data];
+      sorted.sort((a, b) => {
+        let result = 0;
+        if (column === 'transactionTime') {
+          result = new Date(a[column]).getTime() - new Date(b[column]).getTime();
+        } else if (column === 'amountMinorUnits') {
+          result = (a[column] || 0) - (b[column] || 0);
+        } else {
+          result = (a[column] || '').localeCompare(b[column] || '', undefined, { sensitivity: 'base' });
+        }
+        return direction === 'asc' ? result : -result;
+      });
+      return sorted;
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        if (currentTransactionsMessage) {
+          th.setAttribute('aria-sort', 'none');
+          return;
+        }
+        const key = th.dataset.sortKey;
+        if (key === sortState.column) {
+          th.setAttribute('aria-sort', sortState.direction === 'asc' ? 'ascending' : 'descending');
+        } else {
+          th.setAttribute('aria-sort', 'none');
+        }
+      });
+    }
+
+    function renderTransactionsTable() {
+      const tbody = document.querySelector('#transaction-table tbody');
+      tbody.innerHTML = '';
+
+      if (currentTransactionsMessage) {
+        selectedTransactionIds.clear();
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 7;
+        cell.textContent = currentTransactionsMessage;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        updateSelectionControls();
+        updatePaginationControls();
+        updateSortIndicators();
+        return;
+      }
+
+      if (!currentTransactions.length) {
+        selectedTransactionIds.clear();
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 7;
+        cell.textContent = 'No transactions found for this flow.';
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        updateSelectionControls();
+        updatePaginationControls();
+        updateSortIndicators();
+        return;
+      }
+
+      const sorted = sortTransactions(currentTransactions);
+      const visibleIdSet = new Set(sorted.map((txn) => txn.feedItemUid));
+      Array.from(selectedTransactionIds).forEach((id) => {
+        if (!visibleIdSet.has(id)) {
+          selectedTransactionIds.delete(id);
+        }
+      });
+
+      sorted.forEach((txn) => {
+        const row = document.createElement('tr');
+
+        const selectCell = document.createElement('td');
+        selectCell.classList.add('select-col');
+        const selectBox = document.createElement('input');
+        selectBox.type = 'checkbox';
+        selectBox.checked = selectedTransactionIds.has(txn.feedItemUid);
+        selectBox.addEventListener('change', (event) => {
+          if (event.target.checked) {
+            selectedTransactionIds.add(txn.feedItemUid);
+          } else {
+            selectedTransactionIds.delete(txn.feedItemUid);
+          }
+          recategoriseStatus.textContent = '';
+          updateSelectionControls();
+        });
+        selectCell.appendChild(selectBox);
+        row.appendChild(selectCell);
+
+        const dateCell = document.createElement('td');
+        dateCell.textContent = new Date(txn.transactionTime).toLocaleString('en-GB', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        });
+        row.appendChild(dateCell);
+
+        const categoryCell = document.createElement('td');
+        categoryCell.textContent = txn.category || 'Uncategorised';
+        row.appendChild(categoryCell);
+
+        const counterpartyCell = document.createElement('td');
+        counterpartyCell.textContent = txn.counterparty || '—';
+        row.appendChild(counterpartyCell);
+
+        const spaceCell = document.createElement('td');
+        spaceCell.textContent = txn.spaceName || txn.spaceUid || '—';
+        row.appendChild(spaceCell);
+
+        const sourceCell = document.createElement('td');
+        sourceCell.textContent = txn.source || '—';
+        row.appendChild(sourceCell);
+
+        const amountCell = document.createElement('td');
+        amountCell.classList.add('numeric');
+        const amountMinor = Number(txn.amountMinorUnits || 0);
+        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
+        amountCell.textContent = formatter.format(amountMinor / 100);
+        if (amountMinor > 0) {
+          amountCell.classList.add('amount-income');
+        } else if (amountMinor < 0) {
+          amountCell.classList.add('amount-spending');
+        }
+        row.appendChild(amountCell);
+
+        tbody.appendChild(row);
+      });
+
+      updateSelectionControls();
+      updatePaginationControls();
+      updateSortIndicators();
+    }
+
+    async function loadTransactions(page = 1) {
+      currentTransactions = [];
+      currentTransactionsMessage = 'Loading…';
+      resetTransactionsPaging(page);
+      renderTransactionsTable();
+
+      const params = new URLSearchParams();
+      params.set('flow', currentFlow);
+      params.set('page', String(page));
+      if (currentSummary?.start && currentSummary?.end) {
+        params.set('start', currentSummary.start);
+        params.set('end', currentSummary.end);
+      } else {
+        params.set('days', String(summaryDaysDefault));
+      }
+
+      try {
+        const response = await fetch(`${cashflowTransactionsEndpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch transactions');
+        }
+        const payload = await response.json();
+        currentTransactions = payload.transactions || [];
+        currentTransactionsMessage = null;
+        setTransactionsPagingFromPayload(payload, page);
+        transactionsTitle.textContent = `Transactions (${currentFlow})`;
+        renderTransactionsTable();
+      } catch (error) {
+        currentTransactions = [];
+        currentTransactionsMessage = 'Unable to load transactions. Please try again.';
+        selectedTransactionIds.clear();
+        renderTransactionsTable();
+      }
+    }
+
+    async function handleRecategoriseSubmit(event) {
+      event.preventDefault();
+      if (!selectedTransactionIds.size) {
+        return;
+      }
+      const targetCategory = (recategoriseCategory.value || '').trim();
+      if (!targetCategory) {
+        recategoriseStatus.textContent = 'Choose a category first.';
+        return;
+      }
+      const csrfToken = getCookie('csrftoken');
+      if (!csrfToken) {
+        recategoriseStatus.textContent = 'Unable to determine CSRF token.';
+        return;
+      }
+      recategoriseButton.disabled = true;
+      recategoriseButton.textContent = 'Recategorising…';
+      recategoriseStatus.textContent = '';
+      try {
+        const response = await fetch(transactionsRecategoriseEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({
+            feedItemUids: Array.from(selectedTransactionIds),
+            category: targetCategory,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error('Failed to recategorise transactions');
+        }
+        const payload = await response.json();
+        selectedTransactionIds.clear();
+        recategoriseStatus.textContent = `Updated ${payload.updated || 0} transaction${payload.updated === 1 ? '' : 's'}.`;
+        await loadTransactions(transactionsPaging.page);
+      } catch (error) {
+        recategoriseStatus.textContent = 'Unable to recategorise transactions. Please try again.';
+      } finally {
+        recategoriseButton.textContent = 'Recategorise';
+        updateSelectionControls();
+      }
+    }
+
+    function handleSortClick(event) {
+      const key = event.currentTarget.dataset.sortKey;
+      if (!key || currentTransactionsMessage) {
+        return;
+      }
+      if (sortState.column === key) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortState.column = key;
+        sortState.direction = key === 'transactionTime' ? 'desc' : 'asc';
+      }
+      renderTransactionsTable();
+    }
+
+    function handleSelectAllChange(event) {
+      if (!currentTransactions.length) {
+        event.target.checked = false;
+        event.target.indeterminate = false;
+        return;
+      }
+      if (event.target.checked) {
+        currentTransactions.forEach((txn) => {
+          selectedTransactionIds.add(txn.feedItemUid);
+        });
+      } else {
+        currentTransactions.forEach((txn) => {
+          selectedTransactionIds.delete(txn.feedItemUid);
+        });
+        event.target.indeterminate = false;
+      }
+      recategoriseStatus.textContent = '';
+      renderTransactionsTable();
+    }
+
+    async function handleFlowToggleClick(event) {
+      const button = event.target.closest('button[data-flow]');
+      if (!button) {
+        return;
+      }
+      const nextFlow = button.dataset.flow;
+      if (!nextFlow || nextFlow === currentFlow) {
+        return;
+      }
+      currentFlow = nextFlow;
+      setActiveFlowButton(currentFlow);
+      applyChartToggle();
+      await loadTransactions(1);
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      flowToggle.addEventListener('click', handleFlowToggleClick);
+      selectAllCheckbox.addEventListener('change', handleSelectAllChange);
+      recategoriseForm.addEventListener('submit', handleRecategoriseSubmit);
+      document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
+        th.addEventListener('click', handleSortClick);
+      });
+      transactionsPrevPage.addEventListener('click', () => {
+        if (transactionsPaging.hasPreviousPage) {
+          void loadTransactions(transactionsPaging.page - 1);
+        }
+      });
+      transactionsNextPage.addEventListener('click', () => {
+        if (transactionsPaging.hasNextPage) {
+          void loadTransactions(transactionsPaging.page + 1);
+        }
+      });
+
+      try {
+        await loadChartData();
+      } catch (error) {
+        currentTransactionsMessage = 'Unable to load chart data.';
+        renderTransactionsTable();
+      }
+      setActiveFlowButton(currentFlow);
+      await loadTransactions(1);
+    });
+  </script>
+{% endblock %}

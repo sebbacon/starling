@@ -14,6 +14,7 @@ from django.core.management import call_command
 
 from starling_spaces.analytics import (
     calculate_income_by_category,
+    calculate_monthly_cashflow_totals,
     calculate_spend_by_category,
     summarise_category_totals,
     EXCLUDED_TRANSFER_SOURCES,
@@ -294,6 +295,25 @@ def income(request, category_name=None, counterparty_name=None):
     )
 
 
+@require_GET
+def cashflow(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        _, _, days, _ = _resolve_time_window(request, default_days)
+    except ValueError:
+        days = default_days
+
+    return render(
+        request,
+        "spaces/cashflow.html",
+        {
+            "summary_days": days,
+            "category_options": _get_spending_category_options(),
+            "transactions_page_size": TRANSACTIONS_PAGE_SIZE,
+        },
+    )
+
+
 def _render_cashflow_page(request, *, template_name, base_view_name, category_name=None, counterparty_name=None):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -356,6 +376,22 @@ def income_data(request):
 
 
 @require_GET
+def cashflow_data(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    summary = calculate_monthly_cashflow_totals(
+        days=days,
+        reference_time=reference,
+        start_time=window_start,
+    )
+    return JsonResponse(summary)
+
+
+@require_GET
 def spending_transactions(request):
     return _cashflow_transactions(request, flow="spending")
 
@@ -363,6 +399,12 @@ def spending_transactions(request):
 @require_GET
 def income_transactions(request):
     return _cashflow_transactions(request, flow="income")
+
+
+@require_GET
+def cashflow_transactions(request):
+    flow = (request.GET.get("flow") or "both").strip().lower()
+    return _cashflow_transactions(request, flow=flow)
 
 
 @require_GET
@@ -437,7 +479,7 @@ def things_to_do_transactions(request):
 
 
 def _cashflow_transactions(request, *, flow):
-    if flow not in {"spending", "income"}:
+    if flow not in {"spending", "income", "both"}:
         return JsonResponse({"error": "Unsupported flow"}, status=400)
 
     category = request.GET.get("category")
@@ -466,7 +508,7 @@ def _cashflow_transactions(request, *, flow):
     )
     if flow == "income":
         queryset = queryset.filter(amount_minor_units__gt=0)
-    else:
+    elif flow == "spending":
         queryset = queryset.filter(amount_minor_units__lt=0)
 
     if category:
@@ -484,8 +526,10 @@ def _cashflow_transactions(request, *, flow):
         if amount_minor is not None:
             if flow == "spending":
                 search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
-            else:
+            elif flow == "income":
                 search_filter |= Q(amount_minor_units=amount_minor)
+            else:
+                search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
         queryset = queryset.filter(search_filter)
 
     total_count = queryset.count()
@@ -508,18 +552,24 @@ def _cashflow_transactions(request, *, flow):
                 "feedItemUid": item.feed_item_uid,
                 "transactionTime": item.transaction_time.isoformat(),
                 "counterparty": item.counterparty or "",
-                "amountMinorUnits": int(-item.amount_minor_units if flow == "spending" else item.amount_minor_units),
+                "amountMinorUnits": int(
+                    -item.amount_minor_units
+                    if flow == "spending"
+                    else (item.amount_minor_units if flow == "income" else item.amount_minor_units)
+                ),
                 "currency": item.currency or "GBP",
                 "spaceUid": item.space_uid or "",
                 "spaceName": space_name or "",
                 "source": item.source or "",
                 "classificationReason": item.classification_reason or "",
                 "category": item.classified_category or "Uncategorised",
+                "flow": "income" if item.amount_minor_units > 0 else "spending",
                 "raw": item.raw_json or {},
             }
         )
 
     response = {
+        "flow": flow,
         "reference": reference_time.isoformat(),
         "days": days,
         "start": window_start.isoformat(),

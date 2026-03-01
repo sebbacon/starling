@@ -26,6 +26,78 @@ def calculate_income_by_category(*, days: int, reference_time=None, start_time=N
     )
 
 
+def calculate_monthly_cashflow_totals(*, days: int, reference_time=None, start_time=None):
+    if days <= 0:
+        raise ValueError("days must be positive")
+
+    reference = reference_time or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    else:
+        reference = reference.astimezone(timezone.utc)
+
+    window_start = reference - timedelta(days=days)
+    window_end = reference + timedelta(seconds=1)
+    if start_time is not None:
+        if start_time.tzinfo is None:
+            window_start = start_time.replace(tzinfo=timezone.utc)
+        else:
+            window_start = start_time.astimezone(timezone.utc)
+
+    base_queryset = (
+        FeedItem.objects.filter(
+            transaction_time__gte=window_start,
+            transaction_time__lt=window_end,
+        )
+        .annotate(source_upper=Upper("source"))
+        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+    )
+
+    spending_rows = (
+        base_queryset.filter(amount_minor_units__lt=0)
+        .annotate(period=TruncMonth("transaction_time"))
+        .values("period")
+        .annotate(total_minor=Sum(-F("amount_minor_units")))
+        .order_by("period")
+    )
+    income_rows = (
+        base_queryset.filter(amount_minor_units__gt=0)
+        .annotate(period=TruncMonth("transaction_time"))
+        .values("period")
+        .annotate(total_minor=Sum(F("amount_minor_units")))
+        .order_by("period")
+    )
+
+    spending_map = {
+        row["period"].strftime("%Y-%m-%d"): int(row["total_minor"] or 0)
+        for row in spending_rows
+        if row["period"] is not None
+    }
+    income_map = {
+        row["period"].strftime("%Y-%m-%d"): int(row["total_minor"] or 0)
+        for row in income_rows
+        if row["period"] is not None
+    }
+    periods = sorted(set(spending_map) | set(income_map))
+
+    spending_minor_values = [spending_map.get(period, 0) for period in periods]
+    income_minor_values = [income_map.get(period, 0) for period in periods]
+
+    return {
+        "dates": periods,
+        "spendingValues": [round(value / 100, 2) for value in spending_minor_values],
+        "incomeValues": [round(value / 100, 2) for value in income_minor_values],
+        "spendingMinorValues": spending_minor_values,
+        "incomeMinorValues": income_minor_values,
+        "reference": reference.isoformat(),
+        "days": days,
+        "months": len(periods),
+        "bucket": "month",
+        "start": window_start.isoformat(),
+        "end": window_end.isoformat(),
+    }
+
+
 def _calculate_flow_by_category(*, days: int, reference_time=None, start_time=None, flow: str):
     if days <= 0:
         raise ValueError("days must be positive")
