@@ -24,7 +24,7 @@ jobs:
         env:
           STARLING_PAT: ${{ secrets.STARLING_PAT }}
           DJANGO_SETTINGS_MODULE: starling_web.starling_web.settings
-          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DJANGO_SECRET_KEY: "not-used-by-this-command"
           DJANGO_ALLOWED_HOSTS: localhost
           DJANGO_DEBUG: "0"
         run: just salary-automation
