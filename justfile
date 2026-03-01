@@ -29,3 +29,6 @@ coverage:
 
 reclassify-transactions *args:
     PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py reclassify_transactions {{args}}
+
+salary-automation *args:
+    PYTHONPATH="${PYTHONPATH:-.}" UV_CACHE_DIR=.uv_cache uv run python starling_web/manage.py run_salary_automation {{args}}

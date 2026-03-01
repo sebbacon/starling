@@ -1,0 +1,30 @@
+name: Salary Automation
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: salary-automation
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install just
+        run: uv tool install rust-just
+
+      - name: Run salary automation
+        env:
+          STARLING_PAT: ${{ secrets.STARLING_PAT }}
+          DJANGO_SETTINGS_MODULE: starling_web.starling_web.settings
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DJANGO_ALLOWED_HOSTS: localhost
+          DJANGO_DEBUG: "0"
+        run: just salary-automation

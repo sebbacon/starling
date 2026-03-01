@@ -260,6 +260,58 @@ def test_report_spaces_requires_token(monkeypatch):
         call_command("report_spaces")
 
 
+def test_run_salary_automation_command_surfaces_errors(monkeypatch):
+    monkeypatch.setenv("STARLING_PAT", "token")
+
+    from starling_spaces import salary_automation as sa
+
+    def raise_error(*args, **kwargs):
+        raise sa.SalaryAutomationError("automation failed")
+
+    monkeypatch.setattr("starling_spaces.salary_automation.run_salary_automation", raise_error)
+
+    with pytest.raises(CommandError) as excinfo:
+        call_command("run_salary_automation")
+
+    assert "automation failed" in str(excinfo.value)
+
+
+def test_run_salary_automation_requires_token(monkeypatch):
+    monkeypatch.delenv("STARLING_PAT", raising=False)
+
+    with pytest.raises(CommandError):
+        call_command("run_salary_automation")
+
+
+def test_run_salary_automation_passes_dry_run_flag(monkeypatch):
+    monkeypatch.setenv("STARLING_PAT", "token")
+    captured = {}
+
+    def fake_run(token, **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "dryRun": True, "executed": 0, "alreadyDone": 0, "actions": []}
+
+    monkeypatch.setattr("starling_spaces.salary_automation.run_salary_automation", fake_run)
+
+    call_command("run_salary_automation", dry_run=True)
+
+    assert captured["dry_run"] is True
+
+
+def test_run_salary_automation_outputs_summary(monkeypatch, capsys):
+    monkeypatch.setenv("STARLING_PAT", "token")
+    monkeypatch.setattr(
+        "starling_spaces.salary_automation.run_salary_automation",
+        lambda *args, **kwargs: {"status": "ok", "executed": 4, "alreadyDone": 2},
+    )
+
+    call_command("run_salary_automation")
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["executed"] == 4
+
+
 def test_report_spaces_wraps_errors(monkeypatch):
     monkeypatch.setenv("STARLING_PAT", "token")
 
