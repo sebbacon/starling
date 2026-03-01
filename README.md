@@ -61,6 +61,29 @@ just reclassify-transactions
 If `STARLING_PAT` is missing, the commands fail fast with a clear error so secrets issues surface immediately.
 
 
+## Salary automation
+
+A daily automation handles allocating the monthly University of Oxford salary payment across Starling Spaces. It runs automatically via GitHub Actions at 07:00 UTC every day; you can also trigger it manually from the Actions tab.
+
+When it detects a qualifying inbound payment (£5,000–£6,000 from University of Oxford) in the Joint account it:
+
+1. Transfers fixed amounts to Mortgage, Groceries, and Holidays spaces
+2. Tops up Bills and Kids spaces to their target balances
+3. Moves ¾ of the remaining salary into a Salary drawdown space
+4. Releases drawdown back to the main account in three equal tranches at days 8, 15, and 23 of the cycle
+
+The command is **idempotent** — safe to re-run any number of times on the same day without creating duplicate transfers. If it missed a day it will catch up by executing any tranches that are now due.
+
+```bash
+# preview what would happen without moving any money
+just salary-automation --dry-run
+
+# run for real
+just salary-automation
+```
+
+The GitHub Actions workflow requires a `STARLING_PAT` secret (with Savings Goals write access) and a `DJANGO_SECRET_KEY` secret configured in the repository's Actions settings.
+
 ## Tests
 
 ```bash
