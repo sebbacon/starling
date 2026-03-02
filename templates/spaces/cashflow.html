@@ -29,6 +29,40 @@
       border-color: #0f766e;
       color: #ffffff;
     }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .income-scope {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .income-scope__label {
+      color: #334155;
+      font-weight: 600;
+      margin-right: 0.2rem;
+    }
+    .income-scope button {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 0.3rem 0.75rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .income-scope button.is-active {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
     .chart-wrap {
       min-height: 320px;
       height: 360px;
@@ -37,6 +71,40 @@
       width: 100% !important;
       height: 100% !important;
       display: block;
+    }
+    .cashflow-summary {
+      margin: 0.75rem 0 1rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      background: #f8fafc;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 0.75rem;
+    }
+    .cashflow-summary__label {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .cashflow-summary__value {
+      margin: 0.15rem 0 0;
+      color: #0f172a;
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+    .cashflow-summary__value.is-negative {
+      color: #b91c1c;
+    }
+    .cashflow-summary__value.is-positive {
+      color: #0f766e;
+    }
+    .monthly-alerts {
+      margin: 0 0 1rem;
+      color: #b45309;
+      font-weight: 600;
     }
     #transaction-table {
       width: 100%;
@@ -148,11 +216,33 @@
   </style>
 
   <section class="card">
-    <div class="flow-toggle" id="flow-toggle" role="group" aria-label="Cashflow filter">
-      <button type="button" data-flow="both" class="is-active">Both</button>
-      <button type="button" data-flow="spending">Spending</button>
-      <button type="button" data-flow="income">Income</button>
+    <div class="filter-row">
+      <div class="flow-toggle" id="flow-toggle" role="group" aria-label="Cashflow filter">
+        <button type="button" data-flow="both" class="is-active">Both</button>
+        <button type="button" data-flow="spending">Spending</button>
+        <button type="button" data-flow="income">Income</button>
+      </div>
+      <div class="income-scope" id="income-scope-toggle" role="group" aria-label="Income scope">
+        <span class="income-scope__label">Income source</span>
+        <button type="button" data-income-scope="salary" class="is-active">Salary only</button>
+        <button type="button" data-income-scope="all">All income</button>
+      </div>
     </div>
+    <div class="cashflow-summary">
+      <div>
+        <p class="cashflow-summary__label">Total Spending</p>
+        <p class="cashflow-summary__value" id="cashflow-total-spending">£0.00</p>
+      </div>
+      <div>
+        <p class="cashflow-summary__label">Total Income</p>
+        <p class="cashflow-summary__value" id="cashflow-total-income">£0.00</p>
+      </div>
+      <div>
+        <p class="cashflow-summary__label">Net Delta</p>
+        <p class="cashflow-summary__value" id="cashflow-net-delta">£0.00</p>
+      </div>
+    </div>
+    <p id="cashflow-monthly-alerts" class="monthly-alerts" hidden></p>
     <div class="chart-wrap">
       <canvas id="cashflow-chart"></canvas>
     </div>
@@ -206,11 +296,16 @@
     const transactionsPageSizeDefault = {{ transactions_page_size }};
 
     const flowToggle = document.getElementById('flow-toggle');
+    const incomeScopeToggle = document.getElementById('income-scope-toggle');
     const transactionsTitle = document.getElementById('transactions-title');
     const transactionsPagination = document.getElementById('transactions-pagination');
     const transactionsPrevPage = document.getElementById('transactions-prev-page');
     const transactionsNextPage = document.getElementById('transactions-next-page');
     const transactionsPageInfo = document.getElementById('transactions-page-info');
+    const cashflowTotalSpending = document.getElementById('cashflow-total-spending');
+    const cashflowTotalIncome = document.getElementById('cashflow-total-income');
+    const cashflowNetDelta = document.getElementById('cashflow-net-delta');
+    const cashflowMonthlyAlerts = document.getElementById('cashflow-monthly-alerts');
     const selectAllCheckbox = document.getElementById('select-all-transactions');
     const recategoriseForm = document.getElementById('recategorise-form');
     const recategoriseCategory = document.getElementById('recategorise-category');
@@ -218,6 +313,7 @@
     const recategoriseStatus = document.getElementById('recategorise-status');
 
     let currentFlow = 'both';
+    let currentIncomeScope = 'salary';
     let chartInstance = null;
     let currentSummary = null;
     let currentTransactions = [];
@@ -272,12 +368,68 @@
       });
     }
 
+    function setActiveIncomeScopeButton(scope) {
+      Array.from(incomeScopeToggle.querySelectorAll('button[data-income-scope]')).forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.incomeScope === scope);
+      });
+    }
+
     function formatMonthLabel(value) {
       const parsed = new Date(`${value}T00:00:00Z`);
       if (Number.isNaN(parsed.getTime())) {
         return value;
       }
       return parsed.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+    }
+
+    function formatCurrencyFromMinor(valueMinor) {
+      const formatter = new Intl.NumberFormat('en-GB', {
+        style: 'currency',
+        currency: 'GBP',
+      });
+      return formatter.format((Number(valueMinor || 0)) / 100);
+    }
+
+    function updateCashflowSummary(summary) {
+      const spendingMinorValues = summary?.spendingMinorValues || [];
+      const incomeMinorValues = summary?.incomeMinorValues || [];
+      const periods = summary?.dates || [];
+
+      const totalSpendingMinor = spendingMinorValues.reduce((acc, value) => acc + Number(value || 0), 0);
+      const totalIncomeMinor = incomeMinorValues.reduce((acc, value) => acc + Number(value || 0), 0);
+      const netDeltaMinor = totalIncomeMinor - totalSpendingMinor;
+
+      if (cashflowTotalSpending) {
+        cashflowTotalSpending.textContent = formatCurrencyFromMinor(totalSpendingMinor);
+      }
+      if (cashflowTotalIncome) {
+        cashflowTotalIncome.textContent = formatCurrencyFromMinor(totalIncomeMinor);
+      }
+      if (cashflowNetDelta) {
+        cashflowNetDelta.textContent = formatCurrencyFromMinor(netDeltaMinor);
+        cashflowNetDelta.classList.remove('is-positive', 'is-negative');
+        if (netDeltaMinor > 0) {
+          cashflowNetDelta.classList.add('is-positive');
+        } else if (netDeltaMinor < 0) {
+          cashflowNetDelta.classList.add('is-negative');
+        }
+      }
+
+      if (!cashflowMonthlyAlerts) {
+        return;
+      }
+      const overspendMonths = periods.filter((_, index) => {
+        const spendingMinor = Number(spendingMinorValues[index] || 0);
+        const incomeMinor = Number(incomeMinorValues[index] || 0);
+        return spendingMinor > incomeMinor;
+      });
+      if (!overspendMonths.length) {
+        cashflowMonthlyAlerts.hidden = true;
+        cashflowMonthlyAlerts.textContent = '';
+        return;
+      }
+      cashflowMonthlyAlerts.hidden = false;
+      cashflowMonthlyAlerts.textContent = `Spending exceeded income in ${overspendMonths.length} out of ${periods.length} months.`;
     }
 
     function parseMonthStart(value) {
@@ -329,7 +481,15 @@
       if (!chartCanvas) {
         return;
       }
-      const labels = (summary?.dates || []).map(formatMonthLabel);
+      const labels = (summary?.dates || []).map((period, index) => {
+        const label = formatMonthLabel(period);
+        const spendingMinor = Number(summary?.spendingMinorValues?.[index] || 0);
+        const incomeMinor = Number(summary?.incomeMinorValues?.[index] || 0);
+        if (spendingMinor > incomeMinor) {
+          return `${label} ⚠`;
+        }
+        return label;
+      });
       const chartData = {
         labels,
         datasets: [
@@ -353,6 +513,7 @@
       const options = {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
         scales: {
           x: { stacked: false },
           y: {
@@ -382,6 +543,7 @@
           options,
         });
       }
+      updateCashflowSummary(summary);
       applyChartToggle();
     }
 
@@ -397,6 +559,7 @@
     async function loadChartData() {
       const query = new URLSearchParams();
       query.set('days', String(summaryDaysDefault));
+      query.set('income_scope', currentIncomeScope);
       const response = await fetch(`${cashflowDataEndpoint}?${query.toString()}`);
       if (!response.ok) {
         throw new Error('Unable to load cashflow data');
@@ -583,7 +746,8 @@
       renderTransactionsTable();
 
       const params = new URLSearchParams();
-      params.set('flow', currentFlow);
+      params.set('flow', 'both');
+      params.set('income_scope', currentIncomeScope);
       params.set('page', String(page));
       if (currentSummary?.start && currentSummary?.end) {
         params.set('start', currentSummary.start);
@@ -601,7 +765,9 @@
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
         setTransactionsPagingFromPayload(payload, page);
-        transactionsTitle.textContent = `Transactions (${currentFlow})`;
+        transactionsTitle.textContent = currentIncomeScope === 'salary'
+          ? 'Transactions (all spending + salary income)'
+          : 'Transactions (all spending + all income)';
         renderTransactionsTable();
       } catch (error) {
         currentTransactions = [];
@@ -702,11 +868,32 @@
       currentFlow = nextFlow;
       setActiveFlowButton(currentFlow);
       applyChartToggle();
+    }
+
+    async function handleIncomeScopeToggleClick(event) {
+      const button = event.target.closest('button[data-income-scope]');
+      if (!button) {
+        return;
+      }
+      const nextScope = button.dataset.incomeScope;
+      if (!nextScope || nextScope === currentIncomeScope) {
+        return;
+      }
+      currentIncomeScope = nextScope;
+      setActiveIncomeScopeButton(currentIncomeScope);
+      try {
+        await loadChartData();
+      } catch (error) {
+        currentTransactionsMessage = 'Unable to load chart data.';
+        renderTransactionsTable();
+        return;
+      }
       await loadTransactions(1);
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       flowToggle.addEventListener('click', handleFlowToggleClick);
+      incomeScopeToggle.addEventListener('click', handleIncomeScopeToggleClick);
       selectAllCheckbox.addEventListener('change', handleSelectAllChange);
       recategoriseForm.addEventListener('submit', handleRecategoriseSubmit);
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
@@ -734,6 +921,7 @@
         renderTransactionsTable();
       }
       setActiveFlowButton(currentFlow);
+      setActiveIncomeScopeButton(currentIncomeScope);
       await loadTransactions(1);
     });
   </script>

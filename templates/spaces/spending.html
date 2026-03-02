@@ -321,9 +321,55 @@
     .brush-selection.dragging {
       background: rgba(52, 211, 153, 0.35);
     }
+    .category-limit-control {
+      margin-bottom: 1rem;
+      padding: 0.75rem 0.9rem;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      background: #f8fafc;
+      display: grid;
+      gap: 0.45rem;
+    }
+    .category-limit-control label {
+      color: #334155;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .category-limit-control input[type="range"] {
+      width: 100%;
+      accent-color: #0f766e;
+    }
+    .category-limit-control__bounds {
+      display: flex;
+      justify-content: space-between;
+      color: #64748b;
+      font-size: 0.8rem;
+    }
+    .category-limit-control__value {
+      margin: 0;
+      color: #0f172a;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
   </style>
 
   <section class="card">
+    <div class="category-limit-control">
+      <label for="top-category-slider">Categories shown</label>
+      <input
+        id="top-category-slider"
+        type="range"
+        min="5"
+        max="10"
+        step="1"
+        value="10"
+      />
+      <div class="category-limit-control__bounds" aria-hidden="true">
+        <span>5</span>
+        <span>Show all</span>
+      </div>
+      <p class="category-limit-control__value" id="top-category-value">Top 10 categories</p>
+    </div>
     <canvas id="spending-chart" height="320"></canvas>
     <div class="overview-container" id="overview-container">
       <canvas id="spending-overview-chart" height="80"></canvas>
@@ -401,6 +447,10 @@
     const quickRuleEndpoint = "{% url 'spaces:classification-rules-quick' %}";
     const summaryDaysDefault = {{ summary_days }};
     const transactionsPageSizeDefault = {{ transactions_page_size }};
+    const topCategoryRankingDays = 365;
+    const topCategoryDefaultLimit = 10;
+    const topCategoryMinimumLimit = 5;
+    const otherCategoryLabel = 'Other';
     const overviewDays = 1825;
     const initialCategory = "{{ initial_category|escapejs }}";
     const initialCounterparty = "{{ initial_counterparty|escapejs }}";
@@ -459,7 +509,11 @@
     const quickRuleModal = document.getElementById('quick-rule-modal');
     const quickRuleContent = document.getElementById('quick-rule-modal-content');
     const quickRuleFeedback = document.getElementById('quick-rule-feedback');
+    const topCategorySlider = document.getElementById('top-category-slider');
+    const topCategoryValue = document.getElementById('top-category-value');
     let quickRuleReturnFocus = null;
+    let annualCategoryTotals = new Map();
+    let annualCategoryCount = 0;
 
     function openQuickRuleModal(params = {}) {
       if (!quickRuleModal || !quickRuleContent) {
@@ -821,14 +875,131 @@
       }
     }
 
-    function buildDefaultDatasets(series) {
-      return series.map((item) => ({
+    function updateAnnualCategoryTotals(summary) {
+      annualCategoryTotals = new Map();
+      const yearlySeries = summary?.series || [];
+      yearlySeries.forEach((item) => {
+        annualCategoryTotals.set(item.category, Number(item.totalMinorUnits || 0));
+      });
+      annualCategoryCount = yearlySeries.length;
+      configureTopCategoryControl();
+    }
+
+    function configureTopCategoryControl() {
+      if (!topCategorySlider) {
+        return;
+      }
+      const maxValue = Math.max(topCategoryMinimumLimit, annualCategoryCount);
+      topCategorySlider.min = String(topCategoryMinimumLimit);
+      topCategorySlider.max = String(maxValue);
+
+      const existingValue = Number(topCategorySlider.value || topCategoryDefaultLimit);
+      const initialValue = Number.isNaN(existingValue) ? topCategoryDefaultLimit : existingValue;
+      const clamped = Math.max(topCategoryMinimumLimit, Math.min(initialValue, maxValue));
+      topCategorySlider.value = String(clamped);
+      topCategorySlider.disabled = maxValue <= topCategoryMinimumLimit;
+      updateTopCategoryValueLabel();
+    }
+
+    function getTopCategoryLimit() {
+      if (annualCategoryCount <= topCategoryMinimumLimit) {
+        return null;
+      }
+      if (!topCategorySlider) {
+        return topCategoryDefaultLimit;
+      }
+      const selected = Number(topCategorySlider.value || topCategoryDefaultLimit);
+      const clamped = Number.isNaN(selected)
+        ? topCategoryDefaultLimit
+        : Math.max(topCategoryMinimumLimit, Math.min(selected, annualCategoryCount));
+      if (clamped >= annualCategoryCount) {
+        return null;
+      }
+      return clamped;
+    }
+
+    function updateTopCategoryValueLabel() {
+      if (!topCategoryValue) {
+        return;
+      }
+      const limit = getTopCategoryLimit();
+      topCategoryValue.textContent = limit === null ? 'Show all categories' : `Top ${limit} categories`;
+    }
+
+    function getRankingTotal(category, fallbackTotal) {
+      if (annualCategoryTotals.has(category)) {
+        return annualCategoryTotals.get(category);
+      }
+      return Number(fallbackTotal || 0);
+    }
+
+    function buildCategoryDataset(item) {
+      const minorValues = item.minorValues || [];
+      return {
         label: item.category,
-        data: item.values,
+        data: minorValues.map((value) => Number(value || 0) / 100),
         backgroundColor: hashLabel(item.category),
         stack: 'spend-stack',
         currency: item.currency || 'GBP',
-      }));
+      };
+    }
+
+    function buildDefaultDatasets(series) {
+      const items = Array.isArray(series) ? [...series] : [];
+      if (!items.length) {
+        return [];
+      }
+
+      const ranked = items.sort((a, b) => {
+        const left = getRankingTotal(a.category, a.totalMinorUnits);
+        const right = getRankingTotal(b.category, b.totalMinorUnits);
+        if (left !== right) {
+          return right - left;
+        }
+        return (a.category || '').localeCompare(b.category || '', undefined, { sensitivity: 'base' });
+      });
+
+      const limit = getTopCategoryLimit();
+      if (limit === null || ranked.length <= limit) {
+        return ranked.map(buildCategoryDataset);
+      }
+
+      const topItems = ranked.slice(0, limit);
+      const remainder = ranked.slice(limit);
+      const pointCount = currentSummary?.dates?.length || 0;
+      const otherMinorValues = Array.from({ length: pointCount }, () => 0);
+      let otherCurrency = 'GBP';
+
+      remainder.forEach((item) => {
+        const minorValues = item.minorValues || [];
+        if (item.currency) {
+          otherCurrency = item.currency;
+        }
+        for (let index = 0; index < pointCount; index += 1) {
+          otherMinorValues[index] += Number(minorValues[index] || 0);
+        }
+      });
+
+      const datasets = topItems.map(buildCategoryDataset);
+      const otherTotalMinor = otherMinorValues.reduce((sum, value) => sum + value, 0);
+      if (otherTotalMinor > 0) {
+        datasets.push({
+          label: otherCategoryLabel,
+          data: otherMinorValues.map((value) => value / 100),
+          backgroundColor: '#94a3b8',
+          stack: 'spend-stack',
+          currency: otherCurrency,
+          isSyntheticOther: true,
+        });
+      }
+      return datasets;
+    }
+
+    function handleTopCategoryLimitChange() {
+      updateTopCategoryValueLabel();
+      if (chartMode === 'default') {
+        applyDefaultDatasets();
+      }
     }
 
     function sortTransactions(data) {
@@ -1208,6 +1379,9 @@
         return;
       }
       const selectedLabel = dataset.label;
+      if (dataset.isSyntheticOther) {
+        return;
+      }
 
       if (chartMode === 'counterparty') {
         window.location.href = `${counterpartyPathBase}${encodeURIComponent(selectedLabel)}/`;
@@ -1256,6 +1430,7 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          animation: false,
           plugins: {
             legend: { display: false },
             tooltip: { enabled: false },
@@ -1479,6 +1654,16 @@
         console.error('Unable to load overview data', error);
         return;
       }
+      try {
+        const annualSummary = await fetchSpendingData({
+          days: topCategoryRankingDays,
+          reference: overviewSummary.reference,
+        });
+        updateAnnualCategoryTotals(annualSummary);
+      } catch (error) {
+        console.error('Unable to load yearly ranking data', error);
+        updateAnnualCategoryTotals(overviewSummary);
+      }
 
       const ctx = document.getElementById('spending-chart').getContext('2d');
       chartInstance = new Chart(ctx, {
@@ -1489,6 +1674,7 @@
         },
         options: {
           responsive: true,
+          animation: false,
           plugins: {
             legend: { display: false },
             tooltip: {
@@ -1571,9 +1757,14 @@
     if (transactionsNextPage) {
       transactionsNextPage.addEventListener('click', handleNextPage);
     }
+    if (topCategorySlider) {
+      topCategorySlider.addEventListener('input', handleTopCategoryLimitChange);
+      topCategorySlider.addEventListener('change', handleTopCategoryLimitChange);
+    }
 
     updateSelectionControls();
     updatePaginationControls();
+    updateTopCategoryValueLabel();
 
     document.addEventListener('DOMContentLoaded', renderChart);
   </script>

@@ -12,3 +12,7 @@ def test_spaces_models_registered_with_admin():
     assert SyncState in registry
     feed_admin = registry[FeedItem]
     assert "counterparty" in feed_admin.list_display
+    assert any(
+        getattr(item, "__name__", "") == "FeedItemCategoryStateFilter"
+        for item in feed_admin.list_filter
+    )

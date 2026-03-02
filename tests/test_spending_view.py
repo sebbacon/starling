@@ -102,6 +102,8 @@ def test_spending_page_renders(settings):
     assert "href=\"/\"" in markup
     assert response.context["summary_days"] == 365
     assert "overview-container" in markup
+    assert "top-category-slider" in markup
+    assert "Top 10 categories" in markup
     assert response.context["initial_category"] == ""
     assert response.context["initial_counterparty"] == ""
 

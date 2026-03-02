@@ -66,6 +66,18 @@ def test_things_to_do_transactions_returns_uncategorised_only():
                 classified_category="Shopping",
             ),
             _make_item(
+                uid="uncat-literal",
+                when=datetime(2024, 11, 11, 11, 0, tzinfo=timezone.utc),
+                amount_minor_units=-1200,
+                classified_category="Uncategorised",
+            ),
+            _make_item(
+                uid="uncat-empty",
+                when=datetime(2024, 11, 11, 9, 30, tzinfo=timezone.utc),
+                amount_minor_units=-900,
+                classified_category="",
+            ),
+            _make_item(
                 uid="transfer",
                 when=datetime(2024, 11, 13, 10, 0, tzinfo=timezone.utc),
                 amount_minor_units=-4000,
@@ -79,13 +91,13 @@ def test_things_to_do_transactions_returns_uncategorised_only():
     response = client.get(reverse("spaces:things-to-do-transactions"))
     assert response.status_code == 200
     payload = json.loads(response.content.decode())
-    assert payload["count"] == 2
-    assert payload["totalCount"] == 2
+    assert payload["count"] == 4
+    assert payload["totalCount"] == 4
     assert payload["page"] == 1
     assert payload["pageSize"] == 200
     assert payload["totalPages"] == 1
     ids = [item["feedItemUid"] for item in payload["transactions"]]
-    assert ids == ["uncat-in", "uncat-out"]
+    assert ids == ["uncat-literal", "uncat-in", "uncat-empty", "uncat-out"]
 
 
 def test_things_to_do_transactions_paginates_at_200():

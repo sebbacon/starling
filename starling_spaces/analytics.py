@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from django.db.models import F, Sum, Min, Max
+from django.db.models import F, Sum, Min, Max, Q
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek, Upper
 
 from starling_web.spaces.models import FeedItem
@@ -26,9 +26,11 @@ def calculate_income_by_category(*, days: int, reference_time=None, start_time=N
     )
 
 
-def calculate_monthly_cashflow_totals(*, days: int, reference_time=None, start_time=None):
+def calculate_monthly_cashflow_totals(*, days: int, reference_time=None, start_time=None, income_scope: str = "salary"):
     if days <= 0:
         raise ValueError("days must be positive")
+    if income_scope not in {"salary", "all"}:
+        raise ValueError(f"Unsupported income scope: {income_scope}")
 
     reference = reference_time or datetime.now(timezone.utc)
     if reference.tzinfo is None:
@@ -60,8 +62,12 @@ def calculate_monthly_cashflow_totals(*, days: int, reference_time=None, start_t
         .annotate(total_minor=Sum(-F("amount_minor_units")))
         .order_by("period")
     )
+    income_queryset = base_queryset.filter(amount_minor_units__gt=0)
+    if income_scope == "salary":
+        income_queryset = income_queryset.filter(Q(classified_category__icontains="salary"))
+
     income_rows = (
-        base_queryset.filter(amount_minor_units__gt=0)
+        income_queryset
         .annotate(period=TruncMonth("transaction_time"))
         .values("period")
         .annotate(total_minor=Sum(F("amount_minor_units")))
@@ -89,6 +95,7 @@ def calculate_monthly_cashflow_totals(*, days: int, reference_time=None, start_t
         "incomeValues": [round(value / 100, 2) for value in income_minor_values],
         "spendingMinorValues": spending_minor_values,
         "incomeMinorValues": income_minor_values,
+        "incomeScope": income_scope,
         "reference": reference.isoformat(),
         "days": days,
         "months": len(periods),
