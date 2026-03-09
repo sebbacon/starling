@@ -87,8 +87,8 @@ def due_release_count(
         return 0
 
     current_local_date = current.astimezone(LONDON_TZ).date()
-    salary_local_date = salary.astimezone(LONDON_TZ).date()
-    day_offset = (current_local_date - salary_local_date).days
+    cycle_start = current_local_date.replace(day=1)
+    day_offset = (current_local_date - cycle_start).days
     cycle_day = day_offset + 1
 
     due = 0
@@ -111,6 +111,7 @@ def run_salary_automation(
         raise SalaryAutomationError("STARLING_PAT must not be blank")
 
     now_utc = _as_utc(now or datetime.now(timezone.utc))
+    cycle_start = _month_cycle_start(now_utc)
     headers = {
         "Authorization": f"Bearer {cleaned_token}",
         "Accept": "application/json",
@@ -148,6 +149,12 @@ def run_salary_automation(
         allocations, drawdown_funding = _plan_initial_allocations(
             spaces=spaces,
             salary_minor_units=salary_minor_units,
+            top_up_balances=_resolve_top_up_cycle_start_balances(
+                client,
+                account_uid=account["uid"],
+                spaces=spaces,
+                cycle_start=cycle_start,
+            ),
         )
         due_tranches = due_release_count(salary_time, now=now_utc)
         tranche_minor_units = split_into_three_tranches(drawdown_funding)
@@ -417,6 +424,7 @@ def _plan_initial_allocations(
     *,
     spaces: Dict[str, SpaceSnapshot],
     salary_minor_units: int,
+    top_up_balances: Dict[str, int],
 ) -> tuple[List[PlannedTransfer], int]:
     planned: List[PlannedTransfer] = []
     initial_total = 0
@@ -434,7 +442,7 @@ def _plan_initial_allocations(
         initial_total += amount_minor_units
 
     for key, space_name, target_minor_units in TOP_UP_TARGETS:
-        top_up_minor_units = target_minor_units - spaces[space_name].balance_minor_units
+        top_up_minor_units = target_minor_units - top_up_balances[space_name]
         if top_up_minor_units < 0:
             top_up_minor_units = 0
         planned.append(
@@ -465,6 +473,40 @@ def _plan_initial_allocations(
     )
 
     return planned, drawdown_funding
+
+
+def _resolve_top_up_cycle_start_balances(
+    client: httpx.Client,
+    *,
+    account_uid: str,
+    spaces: Dict[str, SpaceSnapshot],
+    cycle_start: datetime,
+) -> Dict[str, int]:
+    changes_since = _isoformat_utc(cycle_start)
+    balances: Dict[str, int] = {}
+
+    for _, space_name, _ in TOP_UP_TARGETS:
+        snapshot = spaces[space_name]
+        feed_items = _fetch_feed_items(
+            client,
+            account_uid=account_uid,
+            category_uid=snapshot.uid,
+            changes_since=changes_since,
+        )
+        movement_minor_units = 0
+        for item in feed_items:
+            money = _extract_feed_money(item)
+            if money is None:
+                raise SalaryAutomationError(
+                    f"Top-up space feed item missing amount for {space_name}"
+                )
+            movement_minor_units += _normalise_minor_units(
+                money.minor_units,
+                item.get("direction"),
+            )
+        balances[space_name] = snapshot.balance_minor_units - movement_minor_units
+
+    return balances
 
 
 def _execute_planned_transfer(
@@ -566,6 +608,12 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _month_cycle_start(value: datetime) -> datetime:
+    local = _as_utc(value).astimezone(LONDON_TZ)
+    cycle_start_local = datetime(local.year, local.month, 1, tzinfo=LONDON_TZ)
+    return cycle_start_local.astimezone(timezone.utc)
 
 
 def _isoformat_utc(value: datetime) -> str:

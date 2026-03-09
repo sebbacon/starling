@@ -55,6 +55,19 @@ def test_due_release_count_returns_zero_when_now_equals_salary():
     assert salary_automation.due_release_count(salary_time, now=salary_time) == 0
 
 
+def test_due_release_count_anchors_to_calendar_month_start():
+    salary_time = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc),
+    ) == 0
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 3, 8, 9, 0, tzinfo=timezone.utc),
+    ) == 1
+
+
 # ---------------------------------------------------------------------------
 # _as_utc
 # ---------------------------------------------------------------------------
@@ -207,12 +220,20 @@ def _make_spaces(bills_balance=0, kids_balance=0):
     }
 
 
+def _top_up_balances_from_spaces(spaces):
+    return {
+        "Bills (monthly)": spaces["Bills (monthly)"].balance_minor_units,
+        "Kids (monthly)": spaces["Kids (monthly)"].balance_minor_units,
+    }
+
+
 def test_plan_initial_allocations_clamps_negative_topup_to_zero():
     # Bills balance already exceeds target; top-up should be clamped to 0
     spaces = _make_spaces(bills_balance=200000, kids_balance=200000)
     planned, _ = salary_automation._plan_initial_allocations(
         spaces=spaces,
         salary_minor_units=550000,
+        top_up_balances=_top_up_balances_from_spaces(spaces),
     )
     topup_legs = [t for t in planned if "topup" in t.leg]
     assert all(t.amount_minor_units == 0 for t in topup_legs)
@@ -224,7 +245,57 @@ def test_plan_initial_allocations_raises_when_salary_insufficient():
         salary_automation._plan_initial_allocations(
             spaces=spaces,
             salary_minor_units=1,
+            top_up_balances=_top_up_balances_from_spaces(spaces),
         )
+
+
+# ---------------------------------------------------------------------------
+# _resolve_top_up_cycle_start_balances
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_top_up_cycle_start_balances_rewinds_month_activity(monkeypatch):
+    spaces = _make_spaces(bills_balance=90000, kids_balance=15000)
+    space_feed_by_category = {
+        "s-bills": [
+            {
+                "amount": {"currency": "GBP", "minorUnits": 10000},
+                "direction": "OUT",
+            }
+        ],
+        "s-kids": [
+            {
+                "amount": {"currency": "GBP", "minorUnits": 10000},
+                "direction": "OUT",
+            }
+        ],
+    }
+
+    def fake_fetch(
+        client,
+        *,
+        account_uid,
+        category_uid,
+        changes_since,
+    ):
+        return space_feed_by_category[category_uid]
+
+    monkeypatch.setattr(
+        "starling_spaces.salary_automation._fetch_feed_items",
+        fake_fetch,
+    )
+
+    balances = salary_automation._resolve_top_up_cycle_start_balances(
+        None,
+        account_uid="acc-1",
+        spaces=spaces,
+        cycle_start=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert balances == {
+        "Bills (monthly)": 100000,
+        "Kids (monthly)": 25000,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +603,12 @@ def test_run_salary_automation_dry_run_skips_transfers(respx_mock):
             "pageable": {"next": None},
         }
     )
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s4"
+    ).respond(json={"feedItems": [], "pageable": {"next": None}})
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s5"
+    ).respond(json={"feedItems": [], "pageable": {"next": None}})
 
     result = salary_automation.run_salary_automation(
         "TOKEN",
@@ -546,6 +623,138 @@ def test_run_salary_automation_dry_run_skips_transfers(respx_mock):
     assert all(a["result"] in {"would_execute", "not_due"} for a in result["actions"])
     # No PUT requests should have been made
     assert not any(r.request.method == "PUT" for r in respx_mock.calls)
+
+
+# ---------------------------------------------------------------------------
+# Drawdown anchoring to month start
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_run_salary_automation_anchors_drawdown_to_month_start_balances(respx_mock):
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
+        json={
+            "accounts": [
+                {
+                    "accountUid": "acc-1",
+                    "name": "Joint",
+                    "currency": "GBP",
+                    "defaultCategory": "cat-1",
+                }
+            ]
+        }
+    )
+
+    spaces_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/account/acc-1/spaces"
+    )
+    spaces_route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "spaceList": [
+                    {"spaceUid": "s1", "name": "Mortgage (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s2", "name": "Groceries (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s3", "name": "Holidays", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s4", "name": "Bills (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 100000}},
+                    {"spaceUid": "s5", "name": "Kids (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 25000}},
+                    {"spaceUid": "s6", "name": "Salary drawdown", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                ]
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "spaceList": [
+                    {"spaceUid": "s1", "name": "Mortgage (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s2", "name": "Groceries (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s3", "name": "Holidays", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s4", "name": "Bills (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 90000}},
+                    {"spaceUid": "s5", "name": "Kids (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 15000}},
+                    {"spaceUid": "s6", "name": "Salary drawdown", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                ]
+            },
+        ),
+    ]
+
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/cat-1"
+    ).respond(
+        json={
+            "feedItems": [
+                {
+                    "feedItemUid": "salary-1",
+                    "transactionTime": "2026-02-26T09:00:00Z",
+                    "amount": {"currency": "GBP", "minorUnits": 550000},
+                    "direction": "IN",
+                    "counterPartyName": "University of Oxford Payroll",
+                }
+            ],
+            "pageable": {"next": None},
+        }
+    )
+
+    bills_feed_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s4"
+    )
+    bills_feed_route.side_effect = [
+        httpx.Response(200, json={"feedItems": [], "pageable": {"next": None}}),
+        httpx.Response(
+            200,
+            json={
+                "feedItems": [
+                    {
+                        "feedItemUid": "bills-spend-1",
+                        "amount": {"currency": "GBP", "minorUnits": 10000},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-04T09:00:00Z",
+                    }
+                ],
+                "pageable": {"next": None},
+            },
+        ),
+    ]
+
+    kids_feed_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s5"
+    )
+    kids_feed_route.side_effect = [
+        httpx.Response(200, json={"feedItems": [], "pageable": {"next": None}}),
+        httpx.Response(
+            200,
+            json={
+                "feedItems": [
+                    {
+                        "feedItemUid": "kids-spend-1",
+                        "amount": {"currency": "GBP", "minorUnits": 10000},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-05T09:00:00Z",
+                    }
+                ],
+                "pageable": {"next": None},
+            },
+        ),
+    ]
+
+    first = salary_automation.run_salary_automation(
+        "TOKEN",
+        now=datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+    second = salary_automation.run_salary_automation(
+        "TOKEN",
+        now=datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+
+    first_release = next(action for action in first["actions"] if action["leg"] == "release_q2")
+    second_release = next(action for action in second["actions"] if action["leg"] == "release_q2")
+
+    assert first_release["amountMinorUnits"] == 79500
+    assert first_release["result"] == "not_due"
+    assert second_release["amountMinorUnits"] == 79500
+    assert second_release["result"] == "would_execute"
+    assert second["dueReleaseCount"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +831,12 @@ def test_run_salary_automation_is_idempotent_with_deterministic_transfer_uids(re
             "pageable": {"next": None},
         }
     )
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-123/category/space-bills"
+    ).respond(json={"feedItems": [], "pageable": {"next": None}})
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-123/category/space-kids"
+    ).respond(json={"feedItems": [], "pageable": {"next": None}})
 
     seen_transfer_uids = set()
 
