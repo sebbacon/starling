@@ -1183,6 +1183,7 @@ def _cashflow_transactions(request, *, flow, income_scope="all"):
     try:
         page = _parse_positive_int(request.GET.get("page"), 1)
         spender_key, spender_name = _resolve_spender_filter(request.GET.get("spender"), strict=True)
+        comparison_reference = _parse_reference_time(request.GET.get("comparison_reference"))
         sort_key, sort_direction = _resolve_transaction_sort(
             request.GET.get("sort"),
             request.GET.get("direction"),
@@ -1235,7 +1236,7 @@ def _cashflow_transactions(request, *, flow, income_scope="all"):
         summary["periodComparison"] = _build_period_comparison(
             queryset=filtered_queryset,
             flow=flow,
-            reference=reference_time,
+            reference=comparison_reference or reference_time,
         )
     total_count = window_queryset.count()
     total_pages = max(1, math.ceil(total_count / TRANSACTIONS_PAGE_SIZE))

@@ -114,6 +114,7 @@ def test_spending_page_renders(settings):
     assert "summary-average-annual-spending" in markup
     assert "spending-year-comparison" in markup
     assert "spending-year-comparison-table" in markup
+    assert 'id="comparison-period-select"' in markup
     assert '<details class="year-comparison" id="spending-year-comparison">' in markup
     assert "split-by-card-used" in markup
     assert "chart-split-legend" in markup
@@ -491,6 +492,94 @@ def test_spending_transactions_include_trailing_period_comparison(settings):
             "previousPeriodTotal": 30.0,
         },
     ]
+
+
+def test_spending_transactions_accept_comparison_reference_override(settings):
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid="shopping-2024-jan-override",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-2000,
+                currency="GBP",
+                transaction_time=datetime(2024, 1, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2024-feb-override",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2024, 2, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2023-jan-override",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-1000,
+                currency="GBP",
+                transaction_time=datetime(2023, 1, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2023-feb-override",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-2000,
+                currency="GBP",
+                transaction_time=datetime(2023, 2, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+        ]
+    )
+
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "category": "Shopping",
+            "days": 30,
+            "reference": "2024-03-31T23:59:59Z",
+            "comparison_reference": "2024-02-29T23:59:59Z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    comparison = payload["summary"]["periodComparison"]
+    assert comparison["currentPeriod"]["label"] == "Mar 2023 to Feb 2024"
+    assert comparison["previousPeriod"]["label"] == "Mar 2022 to Feb 2023"
 
 
 def test_spending_transactions_can_filter_by_spender(settings):

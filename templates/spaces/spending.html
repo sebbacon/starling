@@ -478,6 +478,25 @@
       color: #64748b;
       font-size: 0.9rem;
     }
+    .year-comparison__controls {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .year-comparison__controls label {
+      color: #334155;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .year-comparison__controls select {
+      min-width: 250px;
+      padding: 0.4rem 0.65rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #0f172a;
+    }
     .year-comparison__stats {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -804,6 +823,12 @@
         </div>
       </summary>
       <div class="year-comparison__content">
+        <div class="year-comparison__controls">
+          <label for="comparison-period-select">12-month window</label>
+          <select id="comparison-period-select" aria-label="Select 12-month comparison period">
+            <option value="">Match selected range</option>
+          </select>
+        </div>
         <div class="year-comparison__stats">
           <div class="year-comparison__stat">
             <p class="year-comparison__stat-label">Current period total</p>
@@ -1042,6 +1067,7 @@
     const spendingYearCurrentAverage = document.getElementById('spending-year-current-average');
     const spendingYearPreviousAverage = document.getElementById('spending-year-previous-average');
     const spendingYearComparisonBody = document.getElementById('spending-year-comparison-body');
+    const comparisonPeriodSelect = document.getElementById('comparison-period-select');
     const categorySidebarList = document.getElementById('category-sidebar-list');
     const sidebarSpenderFilter = document.getElementById('sidebar-spender-filter');
     const categorySelectAllButton = document.getElementById('category-select-all');
@@ -1063,6 +1089,7 @@
     let categorySelectionMode = 'all';
     let activeNoteEditor = null;
     let splitByCardUsed = false;
+    let currentComparisonReference = '';
 
     function getSpenderAccent(spenderKey) {
       if (spenderKey === 'seb') {
@@ -1550,6 +1577,76 @@
         return `${startLabel} to ${endLabel}`;
       }
       return `${startLabel} to ${endLabel} • ${days} day${days === 1 ? '' : 's'}`;
+    }
+
+    function formatMonthYear(value) {
+      if (!value) {
+        return '';
+      }
+      return new Intl.DateTimeFormat('en-GB', {
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(value);
+    }
+
+    function deriveComparisonReferenceValue(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+      }
+      const comparisonDate = new Date(date.getTime() - 1);
+      const exclusiveEnd = new Date(Date.UTC(
+        comparisonDate.getUTCFullYear(),
+        comparisonDate.getUTCMonth() + 1,
+        1,
+      ));
+      return exclusiveEnd.toISOString();
+    }
+
+    function syncComparisonPeriodOptions() {
+      if (!comparisonPeriodSelect || !overviewSummary?.dates?.length) {
+        return;
+      }
+      const options = [];
+      if (currentRange.end instanceof Date && !Number.isNaN(currentRange.end.getTime())) {
+        const defaultReference = deriveComparisonReferenceValue(currentRange.end);
+        const defaultEndMonth = new Date(new Date(defaultReference).getTime() - 1);
+        const defaultStartMonth = new Date(Date.UTC(
+          defaultEndMonth.getUTCFullYear(),
+          defaultEndMonth.getUTCMonth() - 11,
+          1,
+        ));
+        options.push({
+          value: '',
+          label: `Match selected range (${formatMonthYear(defaultStartMonth)} to ${formatMonthYear(defaultEndMonth)})`,
+        });
+      } else {
+        options.push({ value: '', label: 'Match selected range' });
+      }
+
+      for (let endIndex = 11; endIndex < overviewSummary.dates.length; endIndex += 1) {
+        const startDate = parseIsoDate(overviewSummary.dates[endIndex - 11]);
+        const endDate = parseIsoDate(overviewSummary.dates[endIndex]);
+        const optionValue = computeExclusiveEnd(endDate, 'month')?.toISOString();
+        if (!startDate || !endDate || !optionValue) {
+          continue;
+        }
+        options.push({
+          value: optionValue,
+          label: `${formatMonthYear(startDate)} to ${formatMonthYear(endDate)}`,
+        });
+      }
+
+      comparisonPeriodSelect.innerHTML = options.map((option) => `
+        <option value="${option.value}">${option.label}</option>
+      `).join('');
+
+      const nextValue = currentComparisonReference
+        && options.some((option) => option.value === currentComparisonReference)
+        ? currentComparisonReference
+        : '';
+      comparisonPeriodSelect.value = nextValue;
+      comparisonPeriodSelect.disabled = options.length <= 1;
     }
 
     function formatYearComparisonPeriod(comparison) {
@@ -2522,6 +2619,9 @@
       } else if (prepared.type === 'search') {
         params.set('search', prepared.value);
       }
+      if (currentComparisonReference) {
+        params.set('comparison_reference', currentComparisonReference);
+      }
 
       try {
         const response = await fetch(`${transactionsEndpoint}?${params.toString()}`);
@@ -2846,6 +2946,7 @@
         currentSummary = summary;
         currentRange.bucket = summary.bucket || 'month';
         currentRange.days = summary.days;
+        syncComparisonPeriodOptions();
         syncCategorySidebar(summary);
         reapplyChartMode();
         if (currentFilter && options.retainTransactions !== false) {
@@ -2900,6 +3001,7 @@
         overviewSummary = await fetchSpendingData({ days: overviewDays });
         overviewDates = overviewSummary.dates.map(parseIsoDate);
         renderOverviewChart();
+        syncComparisonPeriodOptions();
       } catch (error) {
         console.error('Unable to load overview data', error);
         return;
@@ -2929,6 +3031,7 @@
       try {
         overviewSummary = await fetchSpendingData({ days: overviewDays });
         overviewDates = overviewSummary.dates.map(parseIsoDate);
+        syncComparisonPeriodOptions();
       } catch (error) {
         console.error('Unable to load overview data', error);
         return;
@@ -3051,6 +3154,16 @@
         updateSplitLegend();
         renderTransactionsTable();
         reapplyChartMode();
+      });
+    }
+    if (comparisonPeriodSelect) {
+      comparisonPeriodSelect.addEventListener('change', async () => {
+        currentComparisonReference = comparisonPeriodSelect.value || '';
+        if (currentFilter) {
+          await loadTransactions(currentFilter, { preserveMessage: true });
+          return;
+        }
+        await loadAllTransactions({ preserveMessage: true });
       });
     }
     if (sidebarSpenderFilter) {
