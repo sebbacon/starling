@@ -63,6 +63,32 @@
       border-color: #0f766e;
       color: #ffffff;
     }
+    .range-scope {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .range-scope__label {
+      color: #334155;
+      font-weight: 600;
+      margin-right: 0.2rem;
+    }
+    .range-scope button {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 0.3rem 0.75rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .range-scope button.is-active {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
     .chart-wrap {
       min-height: 320px;
       height: 360px;
@@ -100,6 +126,76 @@
     }
     .cashflow-summary__value.is-positive {
       color: #0f766e;
+    }
+    .cashflow-year-comparison {
+      margin: 0 0 1rem;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      background: #f8fafc;
+      display: grid;
+      gap: 0.85rem;
+    }
+    .cashflow-year-comparison[open] {
+      padding: 0.85rem 1rem;
+    }
+    .cashflow-year-comparison__summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      cursor: pointer;
+      list-style: none;
+    }
+    .cashflow-year-comparison__summary::-webkit-details-marker {
+      display: none;
+    }
+    .cashflow-year-comparison__summary::after {
+      content: "Show";
+      color: #334155;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .cashflow-year-comparison[open] .cashflow-year-comparison__summary {
+      padding: 0 0 0.85rem;
+    }
+    .cashflow-year-comparison[open] .cashflow-year-comparison__summary::after {
+      content: "Hide";
+    }
+    .cashflow-year-comparison__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .cashflow-year-comparison__title {
+      margin: 0;
+      color: #0f172a;
+      font-size: 1rem;
+    }
+    .cashflow-year-comparison__period {
+      margin: 0.15rem 0 0;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
+    .cashflow-year-comparison__table-wrap {
+      overflow-x: auto;
+    }
+    .cashflow-year-comparison__table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .cashflow-year-comparison__table th,
+    .cashflow-year-comparison__table td {
+      padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid #dbe3ef;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .cashflow-year-comparison__table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
     .monthly-alerts {
       margin: 0 0 1rem;
@@ -222,10 +318,18 @@
         <button type="button" data-flow="spending">Spending</button>
         <button type="button" data-flow="income">Income</button>
       </div>
-      <div class="income-scope" id="income-scope-toggle" role="group" aria-label="Income scope">
-        <span class="income-scope__label">Income source</span>
-        <button type="button" data-income-scope="salary" class="is-active">Salary only</button>
-        <button type="button" data-income-scope="all">All income</button>
+      <div class="filter-row">
+        <div class="range-scope" id="cashflow-range-toggle" role="group" aria-label="Cashflow range">
+          <span class="range-scope__label">Period</span>
+          <button type="button" data-range="year" {% if cashflow_range != "all" %}class="is-active"{% endif %}>Past year</button>
+          <button type="button" data-range="all" {% if cashflow_range == "all" %}class="is-active"{% endif %}>All time</button>
+        </div>
+        <div class="income-scope" id="income-scope-toggle" role="group" aria-label="Income scope">
+          <span class="income-scope__label">Income source</span>
+          <button type="button" data-income-scope="salary" class="is-active">Salary only</button>
+          <button type="button" data-income-scope="payments">Payments only</button>
+          <button type="button" data-income-scope="all">All income</button>
+        </div>
       </div>
     </div>
     <div class="cashflow-summary">
@@ -241,7 +345,53 @@
         <p class="cashflow-summary__label">Net Delta</p>
         <p class="cashflow-summary__value" id="cashflow-net-delta">£0.00</p>
       </div>
+      <div>
+        <p class="cashflow-summary__label">Average Monthly Net Delta</p>
+        <p class="cashflow-summary__value" id="cashflow-average-net-delta">£0.00</p>
+      </div>
     </div>
+    <details class="cashflow-year-comparison" id="cashflow-year-comparison">
+      <summary class="cashflow-year-comparison__summary">
+        <div>
+          <h3 class="cashflow-year-comparison__title">Last 12 Months vs Previous 12 Months</h3>
+          <p class="cashflow-year-comparison__period" id="cashflow-year-comparison-period">Trailing full-month comparison</p>
+        </div>
+      </summary>
+      <div class="cashflow-year-comparison__content">
+        <div class="cashflow-year-comparison__table-wrap">
+          <table class="cashflow-year-comparison__table">
+            <thead>
+              <tr>
+                <th scope="col">Period</th>
+                <th scope="col" class="numeric">Spend</th>
+                <th scope="col" class="numeric">Income</th>
+                <th scope="col" class="numeric">Net</th>
+                <th scope="col" class="numeric">Avg spend / month</th>
+                <th scope="col" class="numeric">Avg income / month</th>
+                <th scope="col" class="numeric">Avg net / month</th>
+              </tr>
+            </thead>
+            <tbody id="cashflow-year-comparison-summary-body"></tbody>
+          </table>
+        </div>
+        <div class="cashflow-year-comparison__table-wrap">
+          <table class="cashflow-year-comparison__table" id="cashflow-year-comparison-table">
+            <thead>
+              <tr>
+                <th scope="col">Month</th>
+                <th scope="col" class="numeric">Current spend</th>
+                <th scope="col" class="numeric">Current income</th>
+                <th scope="col" class="numeric">Current net</th>
+                <th scope="col" class="numeric">Previous spend</th>
+                <th scope="col" class="numeric">Previous income</th>
+                <th scope="col" class="numeric">Previous net</th>
+              </tr>
+            </thead>
+            <tbody id="cashflow-year-comparison-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
     <p id="cashflow-monthly-alerts" class="monthly-alerts" hidden></p>
     <div class="chart-wrap">
       <canvas id="cashflow-chart"></canvas>
@@ -294,8 +444,10 @@
     const incomePageBaseUrl = "{{ income_page_url|escapejs }}";
     const summaryDaysDefault = {{ summary_days }};
     const transactionsPageSizeDefault = {{ transactions_page_size }};
+    const initialCashflowRange = "{{ cashflow_range|escapejs }}";
 
     const flowToggle = document.getElementById('flow-toggle');
+    const cashflowRangeToggle = document.getElementById('cashflow-range-toggle');
     const incomeScopeToggle = document.getElementById('income-scope-toggle');
     const transactionsTitle = document.getElementById('transactions-title');
     const transactionsPagination = document.getElementById('transactions-pagination');
@@ -305,7 +457,11 @@
     const cashflowTotalSpending = document.getElementById('cashflow-total-spending');
     const cashflowTotalIncome = document.getElementById('cashflow-total-income');
     const cashflowNetDelta = document.getElementById('cashflow-net-delta');
+    const cashflowAverageNetDelta = document.getElementById('cashflow-average-net-delta');
     const cashflowMonthlyAlerts = document.getElementById('cashflow-monthly-alerts');
+    const cashflowYearComparisonPeriod = document.getElementById('cashflow-year-comparison-period');
+    const cashflowYearComparisonSummaryBody = document.getElementById('cashflow-year-comparison-summary-body');
+    const cashflowYearComparisonBody = document.getElementById('cashflow-year-comparison-body');
     const selectAllCheckbox = document.getElementById('select-all-transactions');
     const recategoriseForm = document.getElementById('recategorise-form');
     const recategoriseCategory = document.getElementById('recategorise-category');
@@ -314,6 +470,7 @@
 
     let currentFlow = 'both';
     let currentIncomeScope = 'salary';
+    let currentCashflowRange = initialCashflowRange || 'year';
     let chartInstance = null;
     let currentSummary = null;
     let currentTransactions = [];
@@ -374,6 +531,46 @@
       });
     }
 
+    function setActiveCashflowRangeButton(range) {
+      Array.from(cashflowRangeToggle.querySelectorAll('button[data-range]')).forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.range === range);
+      });
+    }
+
+    function describeTransactionsTitle() {
+      if (currentFlow === 'spending') {
+        return 'Transactions (spending only)';
+      }
+      if (currentFlow === 'income') {
+        if (currentIncomeScope === 'salary') {
+          return 'Transactions (salary income only)';
+        }
+        if (currentIncomeScope === 'payments') {
+          return 'Transactions (payments only)';
+        }
+        return 'Transactions (all income only)';
+      }
+      if (currentIncomeScope === 'salary') {
+        return 'Transactions (all spending + salary income)';
+      }
+      if (currentIncomeScope === 'payments') {
+        return 'Transactions (all spending + payments only)';
+      }
+      return 'Transactions (all spending + all income)';
+    }
+
+    function replaceCashflowUrl() {
+      const params = new URLSearchParams(window.location.search);
+      if (currentCashflowRange === 'all') {
+        params.set('range', 'all');
+      } else {
+        params.delete('range');
+      }
+      const query = params.toString();
+      const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+      window.history.replaceState({}, '', nextUrl);
+    }
+
     function formatMonthLabel(value) {
       const parsed = new Date(`${value}T00:00:00Z`);
       if (Number.isNaN(parsed.getTime())) {
@@ -398,6 +595,7 @@
       const totalSpendingMinor = spendingMinorValues.reduce((acc, value) => acc + Number(value || 0), 0);
       const totalIncomeMinor = incomeMinorValues.reduce((acc, value) => acc + Number(value || 0), 0);
       const netDeltaMinor = totalIncomeMinor - totalSpendingMinor;
+      const averageMonthlyNetDeltaMinor = periods.length ? Math.round(netDeltaMinor / periods.length) : 0;
 
       if (cashflowTotalSpending) {
         cashflowTotalSpending.textContent = formatCurrencyFromMinor(totalSpendingMinor);
@@ -414,6 +612,16 @@
           cashflowNetDelta.classList.add('is-negative');
         }
       }
+      if (cashflowAverageNetDelta) {
+        cashflowAverageNetDelta.textContent = formatCurrencyFromMinor(averageMonthlyNetDeltaMinor);
+        cashflowAverageNetDelta.classList.remove('is-positive', 'is-negative');
+        if (averageMonthlyNetDeltaMinor > 0) {
+          cashflowAverageNetDelta.classList.add('is-positive');
+        } else if (averageMonthlyNetDeltaMinor < 0) {
+          cashflowAverageNetDelta.classList.add('is-negative');
+        }
+      }
+      renderCashflowYearComparison(summary?.comparison || null);
 
       if (!cashflowMonthlyAlerts) {
         return;
@@ -430,6 +638,52 @@
       }
       cashflowMonthlyAlerts.hidden = false;
       cashflowMonthlyAlerts.textContent = `Spending exceeded income in ${overspendMonths.length} out of ${periods.length} months.`;
+    }
+
+    function formatCashflowComparisonPeriod(comparison) {
+      if (!comparison?.currentPeriod || !comparison?.previousPeriod) {
+        return 'Trailing full-month comparison';
+      }
+      return `${comparison.currentPeriod.label} vs ${comparison.previousPeriod.label}`;
+    }
+
+    function renderCashflowYearComparison(comparison) {
+      if (cashflowYearComparisonPeriod) {
+        cashflowYearComparisonPeriod.textContent = formatCashflowComparisonPeriod(comparison);
+      }
+      if (cashflowYearComparisonSummaryBody) {
+        const rows = [comparison?.currentPeriod, comparison?.previousPeriod].filter(Boolean);
+        cashflowYearComparisonSummaryBody.innerHTML = rows.length
+          ? rows.map((row) => `
+            <tr>
+              <th scope="row">${row.label}</th>
+              <td class="numeric">${formatCurrencyFromMinor(row.spendingMinorUnits || 0)}</td>
+              <td class="numeric">${formatCurrencyFromMinor(row.incomeMinorUnits || 0)}</td>
+              <td class="numeric">${formatCurrencyFromMinor(row.netMinorUnits || 0)}</td>
+              <td class="numeric">${formatCurrencyFromMinor(row.averageMonthlySpendingMinorUnits || 0)}</td>
+              <td class="numeric">${formatCurrencyFromMinor(row.averageMonthlyIncomeMinorUnits || 0)}</td>
+              <td class="numeric">${formatCurrencyFromMinor(row.averageMonthlyNetMinorUnits || 0)}</td>
+            </tr>
+          `).join('')
+          : '<tr><td colspan="7">No year comparison available.</td></tr>';
+      }
+      if (!cashflowYearComparisonBody) {
+        return;
+      }
+      const rows = comparison?.monthByMonth || [];
+      cashflowYearComparisonBody.innerHTML = rows.length
+        ? rows.map((row) => `
+          <tr>
+            <th scope="row">${row.label} / ${row.previousLabel}</th>
+            <td class="numeric">${formatCurrencyFromMinor(row.currentPeriodSpendingMinorUnits || 0)}</td>
+            <td class="numeric">${formatCurrencyFromMinor(row.currentPeriodIncomeMinorUnits || 0)}</td>
+            <td class="numeric">${formatCurrencyFromMinor(row.currentPeriodNetMinorUnits || 0)}</td>
+            <td class="numeric">${formatCurrencyFromMinor(row.previousPeriodSpendingMinorUnits || 0)}</td>
+            <td class="numeric">${formatCurrencyFromMinor(row.previousPeriodIncomeMinorUnits || 0)}</td>
+            <td class="numeric">${formatCurrencyFromMinor(row.previousPeriodNetMinorUnits || 0)}</td>
+          </tr>
+        `).join('')
+        : '<tr><td colspan="7">No month-by-month comparison available.</td></tr>';
     }
 
     function parseMonthStart(value) {
@@ -558,7 +812,7 @@
 
     async function loadChartData() {
       const query = new URLSearchParams();
-      query.set('days', String(summaryDaysDefault));
+      query.set('range', currentCashflowRange);
       query.set('income_scope', currentIncomeScope);
       const response = await fetch(`${cashflowDataEndpoint}?${query.toString()}`);
       if (!response.ok) {
@@ -602,23 +856,6 @@
       transactionsPrevPage.disabled = !transactionsPaging.hasPreviousPage;
       transactionsNextPage.disabled = !transactionsPaging.hasNextPage;
       transactionsPageInfo.textContent = `Page ${transactionsPaging.page} of ${transactionsPaging.totalPages} (${transactionsPaging.totalCount})`;
-    }
-
-    function sortTransactions(data) {
-      const { column, direction } = sortState;
-      const sorted = [...data];
-      sorted.sort((a, b) => {
-        let result = 0;
-        if (column === 'transactionTime') {
-          result = new Date(a[column]).getTime() - new Date(b[column]).getTime();
-        } else if (column === 'amountMinorUnits') {
-          result = (a[column] || 0) - (b[column] || 0);
-        } else {
-          result = (a[column] || '').localeCompare(b[column] || '', undefined, { sensitivity: 'base' });
-        }
-        return direction === 'asc' ? result : -result;
-      });
-      return sorted;
     }
 
     function updateSortIndicators() {
@@ -668,15 +905,14 @@
         return;
       }
 
-      const sorted = sortTransactions(currentTransactions);
-      const visibleIdSet = new Set(sorted.map((txn) => txn.feedItemUid));
+      const visibleIdSet = new Set(currentTransactions.map((txn) => txn.feedItemUid));
       Array.from(selectedTransactionIds).forEach((id) => {
         if (!visibleIdSet.has(id)) {
           selectedTransactionIds.delete(id);
         }
       });
 
-      sorted.forEach((txn) => {
+      currentTransactions.forEach((txn) => {
         const row = document.createElement('tr');
 
         const selectCell = document.createElement('td');
@@ -746,14 +982,16 @@
       renderTransactionsTable();
 
       const params = new URLSearchParams();
-      params.set('flow', 'both');
+      params.set('flow', currentFlow);
       params.set('income_scope', currentIncomeScope);
       params.set('page', String(page));
+      params.set('sort', sortState.column);
+      params.set('direction', sortState.direction);
       if (currentSummary?.start && currentSummary?.end) {
         params.set('start', currentSummary.start);
         params.set('end', currentSummary.end);
       } else {
-        params.set('days', String(summaryDaysDefault));
+        params.set('range', currentCashflowRange);
       }
 
       try {
@@ -765,9 +1003,7 @@
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
         setTransactionsPagingFromPayload(payload, page);
-        transactionsTitle.textContent = currentIncomeScope === 'salary'
-          ? 'Transactions (all spending + salary income)'
-          : 'Transactions (all spending + all income)';
+        transactionsTitle.textContent = describeTransactionsTitle();
         renderTransactionsTable();
       } catch (error) {
         currentTransactions = [];
@@ -833,7 +1069,7 @@
         sortState.column = key;
         sortState.direction = key === 'transactionTime' ? 'desc' : 'asc';
       }
-      renderTransactionsTable();
+      void loadTransactions(1);
     }
 
     function handleSelectAllChange(event) {
@@ -868,6 +1104,7 @@
       currentFlow = nextFlow;
       setActiveFlowButton(currentFlow);
       applyChartToggle();
+      await loadTransactions(1);
     }
 
     async function handleIncomeScopeToggleClick(event) {
@@ -891,8 +1128,31 @@
       await loadTransactions(1);
     }
 
+    async function handleRangeToggleClick(event) {
+      const button = event.target.closest('button[data-range]');
+      if (!button) {
+        return;
+      }
+      const nextRange = button.dataset.range;
+      if (!nextRange || nextRange === currentCashflowRange) {
+        return;
+      }
+      currentCashflowRange = nextRange;
+      setActiveCashflowRangeButton(currentCashflowRange);
+      replaceCashflowUrl();
+      try {
+        await loadChartData();
+      } catch (error) {
+        currentTransactionsMessage = 'Unable to load chart data.';
+        renderTransactionsTable();
+        return;
+      }
+      await loadTransactions(1);
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       flowToggle.addEventListener('click', handleFlowToggleClick);
+      cashflowRangeToggle.addEventListener('click', handleRangeToggleClick);
       incomeScopeToggle.addEventListener('click', handleIncomeScopeToggleClick);
       selectAllCheckbox.addEventListener('change', handleSelectAllChange);
       recategoriseForm.addEventListener('submit', handleRecategoriseSubmit);
@@ -921,6 +1181,7 @@
         renderTransactionsTable();
       }
       setActiveFlowButton(currentFlow);
+      setActiveCashflowRangeButton(currentCashflowRange);
       setActiveIncomeScopeButton(currentIncomeScope);
       await loadTransactions(1);
     });

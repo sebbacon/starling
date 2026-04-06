@@ -6,7 +6,7 @@ from django.test import Client
 from django.urls import reverse
 
 from starling_spaces.analytics import calculate_spend_by_category
-from starling_web.spaces.models import Category, FeedItem
+from starling_web.spaces.models import Category, CounterpartyNote, FeedItem, TransactionNote
 
 
 pytestmark = pytest.mark.django_db
@@ -53,6 +53,7 @@ def _seed_transactions():
                 spending_category="SHOPPING",
                 classified_category="Shopping",
                 classification_reason="starling_fallback",
+                spender="Seb",
                 raw_json={},
             ),
             FeedItem(
@@ -85,6 +86,7 @@ def _seed_transactions():
                 spending_category="SHOPPING",
                 classified_category="Shopping",
                 classification_reason="starling_fallback",
+                spender="Kim",
                 raw_json={},
             ),
         ]
@@ -104,6 +106,21 @@ def test_spending_page_renders(settings):
     assert "overview-container" in markup
     assert "top-category-slider" in markup
     assert "Top 10 categories" in markup
+    assert "category-sidebar" in markup
+    assert "category-select-all" in markup
+    assert "category-clear-all" in markup
+    assert "summary-total-spending" in markup
+    assert "summary-average-monthly-spending" in markup
+    assert "summary-average-annual-spending" in markup
+    assert "spending-year-comparison" in markup
+    assert "spending-year-comparison-table" in markup
+    assert '<details class="year-comparison" id="spending-year-comparison">' in markup
+    assert "split-by-card-used" in markup
+    assert "chart-split-legend" in markup
+    assert "sidebar-spender-filter" in markup
+    assert 'id="spender-filter"' not in markup
+    assert "/spending/notes/counterparty/" in markup
+    assert "/spending/notes/transaction/" in markup
     assert response.context["initial_category"] == ""
     assert response.context["initial_counterparty"] == ""
 
@@ -142,6 +159,14 @@ def test_spending_page_prefills_search_query(settings):
     assert response.context["initial_search"] == "Merchant"
 
 
+def test_spending_page_prefills_spender_query(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(reverse("spaces:spending"), {"spender": "kim"})
+    assert response.status_code == 200
+    assert response.context["initial_spender"] == "kim"
+
+
 def test_spending_data_groups_by_spending_category(settings):
     _seed_transactions()
     client = Client()
@@ -171,9 +196,52 @@ def test_spending_data_groups_by_spending_category(settings):
     assert totals["Shopping"] == 8000
 
 
+def test_spending_data_can_filter_by_spender(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-data"),
+        {
+            "reference": "2024-11-15T00:00:00Z",
+            "days": 10,
+            "spender": "kim",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["spender"] == "kim"
+    assert len(payload["series"]) == 1
+    assert payload["series"][0]["minorValues"] == [3000]
+    assert payload["spenderSeries"]["kim"][0]["minorValues"] == [3000]
+
+
+def test_spending_data_includes_spender_split_series(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-data"),
+        {
+            "reference": "2024-11-15T00:00:00Z",
+            "days": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["spenderSeries"]["seb"][0]["category"] == "Shopping"
+    assert payload["spenderSeries"]["seb"][0]["minorValues"] == [5000]
+    assert payload["spenderSeries"]["kim"][0]["minorValues"] == [3000]
+
+
 def test_spending_data_rejects_invalid_days():
     client = Client()
     response = client.get(reverse("spaces:spending-data"), {"days": 0})
+    assert response.status_code == 400
+
+
+def test_spending_data_rejects_invalid_spender():
+    client = Client()
+    response = client.get(reverse("spaces:spending-data"), {"spender": "alex"})
     assert response.status_code == 400
 
 
@@ -249,6 +317,200 @@ def test_spending_transactions_returns_matching_rows(settings):
     assert payload["transactions"][0]["amountMinorUnits"] == 3000
     assert payload["transactions"][1]["amountMinorUnits"] == 5000
     assert payload["transactions"][0]["category"] == "Shopping"
+    assert payload["summary"]["totalMinorUnits"] == 8000
+    assert payload["summary"]["total"] == 80.0
+    assert payload["summary"]["averageMonthlyMinorUnits"] == 8111
+    assert payload["summary"]["averageMonthly"] == 81.11
+    assert payload["summary"]["averageAnnualMinorUnits"] == 97333
+    assert payload["summary"]["averageAnnual"] == 973.33
+    assert payload["summary"]["periodDays"] == 30
+    assert payload["summary"]["currency"] == "GBP"
+    assert payload["summary"]["periodComparison"]["currentPeriod"]["label"] == "Nov 2023 to Oct 2024"
+    assert payload["summary"]["periodComparison"]["previousPeriod"]["label"] == "Nov 2022 to Oct 2023"
+
+
+def test_spending_transactions_include_trailing_period_comparison(settings):
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid="shopping-2024-jan",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-2000,
+                currency="GBP",
+                transaction_time=datetime(2024, 1, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2024-feb",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2024, 2, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2024-mar",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-4000,
+                currency="GBP",
+                transaction_time=datetime(2024, 3, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2023-jan",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-1000,
+                currency="GBP",
+                transaction_time=datetime(2023, 1, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2023-feb",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-2000,
+                currency="GBP",
+                transaction_time=datetime(2023, 2, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="shopping-2023-mar",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2023, 3, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+        ]
+    )
+
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "category": "Shopping",
+            "days": 30,
+            "reference": "2024-03-31T23:59:59Z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    comparison = payload["summary"]["periodComparison"]
+    assert comparison["currentPeriod"] == {
+        "label": "Apr 2023 to Mar 2024",
+        "start": "2023-04-01T00:00:00+00:00",
+        "end": "2024-04-01T00:00:00+00:00",
+        "totalMinorUnits": 9000,
+        "total": 90.0,
+        "monthlyAverageMinorUnits": 750,
+        "monthlyAverage": 7.5,
+        "months": 12,
+    }
+    assert comparison["previousPeriod"] == {
+        "label": "Apr 2022 to Mar 2023",
+        "start": "2022-04-01T00:00:00+00:00",
+        "end": "2023-04-01T00:00:00+00:00",
+        "totalMinorUnits": 6000,
+        "total": 60.0,
+        "monthlyAverageMinorUnits": 500,
+        "monthlyAverage": 5.0,
+        "months": 12,
+    }
+    assert len(comparison["monthByMonth"]) == 12
+    assert comparison["monthByMonth"][-3:] == [
+        {
+            "label": "Jan 2024",
+            "previousLabel": "Jan 2023",
+            "currentPeriodMinorUnits": 2000,
+            "currentPeriodTotal": 20.0,
+            "previousPeriodMinorUnits": 1000,
+            "previousPeriodTotal": 10.0,
+        },
+        {
+            "label": "Feb 2024",
+            "previousLabel": "Feb 2023",
+            "currentPeriodMinorUnits": 3000,
+            "currentPeriodTotal": 30.0,
+            "previousPeriodMinorUnits": 2000,
+            "previousPeriodTotal": 20.0,
+        },
+        {
+            "label": "Mar 2024",
+            "previousLabel": "Mar 2023",
+            "currentPeriodMinorUnits": 4000,
+            "currentPeriodTotal": 40.0,
+            "previousPeriodMinorUnits": 3000,
+            "previousPeriodTotal": 30.0,
+        },
+    ]
+
+
+def test_spending_transactions_can_filter_by_spender(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "category": "Shopping",
+            "spender": "seb",
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["spender"] == "seb"
+    ids = [item["feedItemUid"] for item in payload["transactions"]]
+    assert ids == ["item-space"]
+    assert payload["summary"]["totalMinorUnits"] == 5000
 
 
 def test_spending_transactions_can_filter_counterparty(settings):
@@ -267,6 +529,151 @@ def test_spending_transactions_can_filter_counterparty(settings):
     assert payload["counterparty"] == "Merchant"
     assert payload["count"] == 1
     assert payload["transactions"][0]["counterparty"] == "Merchant"
+
+
+def test_spending_transactions_can_filter_multiple_categories(settings):
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid="item-shopping",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="item-dining",
+                account_uid="acc-1",
+                category_uid="cat-2",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-4500,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 13, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Cafe",
+                spending_category="EATING_OUT",
+                classified_category="Dining",
+                classification_reason="starling_fallback",
+                raw_json={},
+            ),
+        ]
+    )
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+            "categories": ["Dining"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert [item["feedItemUid"] for item in payload["transactions"]] == ["item-dining"]
+    assert payload["transactions"][0]["category"] == "Dining"
+
+
+def test_spending_transactions_apply_categories_and_spender_to_summary(settings):
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid="item-seb-dining",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-3000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 12, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Cafe One",
+                spending_category="EATING_OUT",
+                classified_category="Dining",
+                classification_reason="starling_fallback",
+                spender="Seb",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="item-kim-dining",
+                account_uid="acc-1",
+                category_uid="cat-2",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-4500,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 13, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Cafe Two",
+                spending_category="EATING_OUT",
+                classified_category="Dining",
+                classification_reason="starling_fallback",
+                spender="Kim",
+                raw_json={},
+            ),
+            FeedItem(
+                feed_item_uid="item-seb-shopping",
+                account_uid="acc-1",
+                category_uid="cat-3",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-7000,
+                currency="GBP",
+                transaction_time=datetime(2024, 11, 10, 14, 0, tzinfo=timezone.utc),
+                source="CARD",
+                counterparty="Shop",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                spender="Seb",
+                raw_json={},
+            ),
+        ]
+    )
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+            "categories": ["Dining"],
+            "spender": "seb",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert [item["feedItemUid"] for item in payload["transactions"]] == ["item-seb-dining"]
+    assert payload["summary"]["totalMinorUnits"] == 3000
+
+
+def test_spending_transactions_return_empty_result_for_empty_category_selection(settings):
+    _seed_transactions()
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+            "categories": ["__none__"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["transactions"] == []
+    assert payload["totalCount"] == 0
+    assert payload["summary"]["totalMinorUnits"] == 0
 
 
 def test_spending_transactions_can_search_counterparty(settings):
@@ -341,6 +748,112 @@ def test_spending_transactions_recategorise_updates(settings):
     item = FeedItem.objects.get(feed_item_uid="item-main")
     assert item.classified_category == "Shopping"
     assert item.classification_reason == "manual"
+
+
+def test_spending_transactions_include_notes(settings):
+    _seed_transactions()
+    CounterpartyNote.objects.create(
+        counterparty="Merchant",
+        counterparty_key="merchant",
+        note="Shared counterparty note",
+    )
+    TransactionNote.objects.create(
+        feed_item_id="item-main",
+        note="Transaction-specific note",
+    )
+
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-15T00:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    notes_by_id = {item["feedItemUid"]: item for item in payload["transactions"]}
+    assert notes_by_id["item-space"]["counterpartyNote"] == "Shared counterparty note"
+    assert notes_by_id["item-space"]["spender"] == "Seb"
+    assert notes_by_id["item-space"]["transactionNote"] == ""
+    assert notes_by_id["item-main"]["counterpartyNote"] == ""
+    assert notes_by_id["item-main"]["spender"] == "Kim"
+    assert notes_by_id["item-main"]["transactionNote"] == "Transaction-specific note"
+
+
+def test_spending_counterparty_note_can_be_saved_and_cleared(settings):
+    _seed_transactions()
+    client = Client(enforce_csrf_checks=False)
+
+    create_response = client.post(
+        reverse("spaces:spending-counterparty-note"),
+        data=json.dumps(
+            {
+                "counterparty": "Merchant",
+                "note": "Remember this is the local bakery",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert create_response.status_code == 200
+    create_payload = json.loads(create_response.content.decode())
+    assert create_payload["note"] == "Remember this is the local bakery"
+    assert CounterpartyNote.objects.get(counterparty_key="merchant").note == "Remember this is the local bakery"
+
+    clear_response = client.post(
+        reverse("spaces:spending-counterparty-note"),
+        data=json.dumps(
+            {
+                "counterparty": "Merchant",
+                "note": "",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert clear_response.status_code == 200
+    clear_payload = json.loads(clear_response.content.decode())
+    assert clear_payload["note"] == ""
+    assert CounterpartyNote.objects.filter(counterparty_key="merchant").count() == 0
+
+
+def test_spending_transaction_note_can_be_saved_and_cleared(settings):
+    _seed_transactions()
+    client = Client(enforce_csrf_checks=False)
+
+    create_response = client.post(
+        reverse("spaces:spending-transaction-note"),
+        data=json.dumps(
+            {
+                "feedItemUid": "item-main",
+                "note": "Refund expected next week",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert create_response.status_code == 200
+    create_payload = json.loads(create_response.content.decode())
+    assert create_payload["note"] == "Refund expected next week"
+    assert TransactionNote.objects.get(feed_item_id="item-main").note == "Refund expected next week"
+
+    clear_response = client.post(
+        reverse("spaces:spending-transaction-note"),
+        data=json.dumps(
+            {
+                "feedItemUid": "item-main",
+                "note": "",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert clear_response.status_code == 200
+    clear_payload = json.loads(clear_response.content.decode())
+    assert clear_payload["note"] == ""
+    assert TransactionNote.objects.filter(feed_item_id="item-main").count() == 0
 
 
 def test_spending_transactions_defaults_to_all_rows(settings):
@@ -429,6 +942,54 @@ def test_spending_transactions_paginates_default_results(settings):
     assert page_two_payload["hasPreviousPage"] is True
     page_two_ids = [item["feedItemUid"] for item in page_two_payload["transactions"]]
     assert page_two_ids == ["item-200", "item-201", "item-202", "item-203", "item-204"]
+
+
+def test_spending_transactions_sort_before_paginating(settings):
+    base_time = datetime(2024, 11, 15, 12, 0, tzinfo=timezone.utc)
+    FeedItem.objects.bulk_create(
+        [
+            FeedItem(
+                feed_item_uid=f"item-{index:03d}",
+                account_uid="acc-1",
+                category_uid="cat-1",
+                space_uid="",
+                direction="OUT",
+                amount_minor_units=-(205 - index),
+                currency="GBP",
+                transaction_time=base_time - timedelta(minutes=index),
+                source="CARD",
+                counterparty=f"Merchant {index}",
+                spending_category="SHOPPING",
+                classified_category="Shopping",
+                classification_reason="starling_fallback",
+                raw_json={},
+            )
+            for index in range(205)
+        ]
+    )
+
+    client = Client()
+    response = client.get(
+        reverse("spaces:spending-transactions"),
+        {
+            "days": 30,
+            "reference": "2024-11-16T00:00:00Z",
+            "sort": "amountMinorUnits",
+            "direction": "asc",
+            "page": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["count"] == 5
+    assert payload["page"] == 2
+    assert payload["totalPages"] == 2
+
+    ids = [item["feedItemUid"] for item in payload["transactions"]]
+    assert ids == ["item-004", "item-003", "item-002", "item-001", "item-000"]
+    amounts = [item["amountMinorUnits"] for item in payload["transactions"]]
+    assert amounts == [201, 202, 203, 204, 205]
 
 
 def test_spending_transactions_rejects_invalid_days():

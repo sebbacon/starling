@@ -1,16 +1,18 @@
 import json
 import math
+import re
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django import forms
 from django.conf import settings
-from django.db.models import Q, Max
-from django.db.models.functions import Upper
+from django.db.models import Case, CharField, F, Max, Min, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce, Lower, TruncMonth, Upper
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.core.management import call_command
 
 from starling_spaces.analytics import (
@@ -20,20 +22,36 @@ from starling_spaces.analytics import (
     summarise_category_totals,
     EXCLUDED_TRANSFER_SOURCES,
 )
+from starling_spaces.holiday_signals import calculate_holiday_signals
 from starling_spaces.savings import calculate_savings_signals
-from starling_web.spaces.models import Category, ClassificationRule, FeedItem
+from starling_web.spaces.models import (
+    Category,
+    ClassificationRule,
+    CounterpartyNote,
+    FeedItem,
+    HolidayMerchantOverride,
+    HolidaySuggestionDecision,
+    SavingsSignalDismissal,
+    TransactionNote,
+    UserDefinedCategory,
+)
 
 
 RULE_TYPE_CHOICES = [
     ("counterparty_regex", "Counterparty matches regular expression"),
+    ("classified_category_regex", "Current category matches regular expression"),
     ("space_name_regex", "Space name matches regular expression"),
     ("source_regex", "Transaction source matches regular expression"),
+    ("amount_range", "Transaction amount falls within an inclusive range"),
     ("space", "Specific space UID"),
     ("raw_path", "Value at JSON path matches"),
     ("starling_category", "Starling spending category fallback"),
     ("space_name", "Use space name as category"),
 ]
 RULE_TYPE_LABELS = dict(RULE_TYPE_CHOICES)
+AMOUNT_QUANTUM = Decimal("0.01")
+MINOR_UNITS_QUANTUM = Decimal("1")
+AVERAGE_DAYS_PER_YEAR = Decimal("365")
 
 CATEGORY_PERIODS = {
     "past_month": {"label": "Past 30 days", "metric": "total"},
@@ -44,6 +62,34 @@ CATEGORY_DEFAULT_PERIOD = "past_month"
 TRANSACTIONS_PAGE_SIZE = 200
 SAVINGS_CONFIDENCE_MODES = {"high", "balanced", "broad"}
 SAVINGS_GROUPS = {"all", "subscriptions", "trends", "anomalies"}
+SAVINGS_DISMISSIBLE_SIGNAL_TYPES = {"subscription"}
+HOLIDAY_SCOPES = {"all", "foreign", "domestic"}
+HOLIDAY_FEEDBACK_DECISIONS = {"accepted", "rejected", "ignored"}
+HOLIDAY_MERCHANT_OVERRIDE_TYPES = {"ignore", "home", "holiday_anchor"}
+HOLIDAY_RANGE_OPTIONS = [
+    ("365", "1 year"),
+    ("730", "2 years"),
+    ("1095", "3 years"),
+    ("all", "All available"),
+]
+CASHFLOW_RANGE_OPTIONS = {
+    "year": "Past year",
+    "all": "All time",
+}
+SPENDER_OPTIONS = {
+    "both": None,
+    "seb": "Seb",
+    "kim": "Kim",
+}
+TRANSACTION_SORT_OPTIONS = {
+    "transactionTime",
+    "category",
+    "counterparty",
+    "spaceName",
+    "source",
+    "amountMinorUnits",
+}
+EMPTY_CATEGORY_SELECTION_TOKEN = "__none__"
 
 
 def _uncategorised_category_filter():
@@ -52,6 +98,311 @@ def _uncategorised_category_filter():
         | Q(classified_category="")
         | Q(classified_category__iexact="Uncategorised")
     )
+
+
+def _parse_json_request_body(request):
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except (TypeError, json.JSONDecodeError):
+        raise ValueError("invalid json payload")
+
+
+def _resolve_spender_filter(raw_value, *, default="both", strict=False):
+    spender_key = (raw_value or default).strip().lower()
+    if spender_key not in SPENDER_OPTIONS:
+        if strict:
+            raise ValueError("Invalid spender")
+        spender_key = default
+    return spender_key, SPENDER_OPTIONS[spender_key]
+
+
+def _resolve_transaction_sort(raw_key, raw_direction):
+    sort_key = (raw_key or "transactionTime").strip()
+    if sort_key not in TRANSACTION_SORT_OPTIONS:
+        raise ValueError("Invalid sort")
+
+    default_direction = "desc" if sort_key == "transactionTime" else "asc"
+    direction = (raw_direction or default_direction).strip().lower()
+    if direction not in {"asc", "desc"}:
+        raise ValueError("Invalid sort direction")
+    return sort_key, direction
+
+
+def _round_minor_units(value):
+    return int(value.quantize(MINOR_UNITS_QUANTUM, rounding=ROUND_HALF_UP))
+
+
+def _build_flow_summary(*, queryset, flow, days):
+    if flow not in {"spending", "income"}:
+        return None
+
+    total_expression = -F("amount_minor_units") if flow == "spending" else F("amount_minor_units")
+    total_minor = int(queryset.aggregate(total_minor=Sum(total_expression))["total_minor"] or 0)
+    period_days = max(1, int(days))
+    annual_average_minor = _round_minor_units(
+        (Decimal(total_minor) * AVERAGE_DAYS_PER_YEAR) / Decimal(period_days)
+    )
+    monthly_average_minor = _round_minor_units(
+        (Decimal(total_minor) * AVERAGE_DAYS_PER_YEAR) / (Decimal("12") * Decimal(period_days))
+    )
+
+    return {
+        "totalMinorUnits": total_minor,
+        "total": round(total_minor / 100, 2),
+        "averageMonthlyMinorUnits": monthly_average_minor,
+        "averageMonthly": round(monthly_average_minor / 100, 2),
+        "averageAnnualMinorUnits": annual_average_minor,
+        "averageAnnual": round(annual_average_minor / 100, 2),
+        "periodDays": period_days,
+        "currency": "GBP",
+    }
+
+
+def _month_start(value):
+    return datetime(value.year, value.month, 1, tzinfo=timezone.utc)
+
+
+def _add_months(value, months):
+    month_index = (value.year * 12) + (value.month - 1) + months
+    year = month_index // 12
+    month = (month_index % 12) + 1
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
+def _latest_complete_month_start(reference):
+    current_month_start = _month_start(reference)
+    if reference + timedelta(seconds=1) >= _add_months(current_month_start, 1):
+        return current_month_start
+    return _add_months(current_month_start, -1)
+
+
+def _format_month_label(value):
+    return value.strftime("%b %Y")
+
+
+def _monthly_total_map(*, queryset, total_expression):
+    rows = (
+        queryset.annotate(period=TruncMonth("transaction_time"))
+        .values("period")
+        .annotate(total_minor=Sum(total_expression))
+        .order_by("period")
+    )
+    return {
+        row["period"].strftime("%Y-%m-%d"): int(row["total_minor"] or 0)
+        for row in rows
+        if row["period"] is not None
+    }
+
+
+def _period_summary_payload(*, label, start, end, months, total_minor):
+    monthly_average_minor = _round_minor_units(Decimal(total_minor) / Decimal(months))
+    return {
+        "label": label,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "totalMinorUnits": total_minor,
+        "total": round(total_minor / 100, 2),
+        "monthlyAverageMinorUnits": monthly_average_minor,
+        "monthlyAverage": round(monthly_average_minor / 100, 2),
+        "months": months,
+    }
+
+
+def _build_period_comparison(*, queryset, flow, reference):
+    if flow not in {"spending", "income"}:
+        return None
+
+    reference = _normalize_to_utc(reference)
+    current_end_month = _latest_complete_month_start(reference)
+    current_start = _add_months(current_end_month, -11)
+    current_end = _add_months(current_end_month, 1)
+    previous_start = _add_months(current_start, -12)
+    previous_end = current_start
+    total_expression = -F("amount_minor_units") if flow == "spending" else F("amount_minor_units")
+
+    current_queryset = queryset.filter(transaction_time__gte=current_start, transaction_time__lt=current_end)
+    previous_queryset = queryset.filter(transaction_time__gte=previous_start, transaction_time__lt=previous_end)
+    current_total = int(current_queryset.aggregate(total_minor=Sum(total_expression))["total_minor"] or 0)
+    previous_total = int(previous_queryset.aggregate(total_minor=Sum(total_expression))["total_minor"] or 0)
+    current_months = _monthly_total_map(queryset=current_queryset, total_expression=total_expression)
+    previous_months = _monthly_total_map(queryset=previous_queryset, total_expression=total_expression)
+
+    return {
+        "currentPeriod": _period_summary_payload(
+            label=f"{_format_month_label(current_start)} to {_format_month_label(current_end_month)}",
+            start=current_start,
+            end=current_end,
+            months=12,
+            total_minor=current_total,
+        ),
+        "previousPeriod": _period_summary_payload(
+            label=f"{_format_month_label(previous_start)} to {_format_month_label(_add_months(previous_end, -1))}",
+            start=previous_start,
+            end=previous_end,
+            months=12,
+            total_minor=previous_total,
+        ),
+        "monthByMonth": [
+            {
+                "label": _format_month_label(_add_months(current_start, index)),
+                "previousLabel": _format_month_label(_add_months(previous_start, index)),
+                "currentPeriodMinorUnits": current_months.get(_add_months(current_start, index).strftime("%Y-%m-%d"), 0),
+                "currentPeriodTotal": round(
+                    current_months.get(_add_months(current_start, index).strftime("%Y-%m-%d"), 0) / 100,
+                    2,
+                ),
+                "previousPeriodMinorUnits": previous_months.get(
+                    _add_months(previous_start, index).strftime("%Y-%m-%d"),
+                    0,
+                ),
+                "previousPeriodTotal": round(
+                    previous_months.get(_add_months(previous_start, index).strftime("%Y-%m-%d"), 0) / 100,
+                    2,
+                ),
+            }
+            for index in range(12)
+        ],
+    }
+
+
+def _base_transactions_queryset():
+    return FeedItem.objects.annotate(source_upper=Upper("source")).exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
+
+
+def _apply_transaction_flow_filter(queryset, *, flow, income_scope):
+    if flow == "income":
+        queryset = queryset.filter(amount_minor_units__gt=0)
+        if income_scope == "salary":
+            return queryset.filter(classified_category__icontains="salary")
+        if income_scope == "payments":
+            return queryset.exclude(classified_category__icontains="salary")
+        return queryset
+    if flow == "spending":
+        return queryset.filter(amount_minor_units__lt=0)
+    if income_scope == "salary":
+        return queryset.filter(
+            Q(amount_minor_units__lt=0)
+            | (Q(amount_minor_units__gt=0) & Q(classified_category__icontains="salary"))
+        )
+    if income_scope == "payments":
+        return queryset.filter(
+            Q(amount_minor_units__lt=0)
+            | (Q(amount_minor_units__gt=0) & ~Q(classified_category__icontains="salary"))
+        )
+    return queryset
+
+
+def _apply_transaction_filters(
+    queryset,
+    *,
+    flow,
+    category,
+    categories,
+    has_empty_category_selection,
+    counterparty,
+    spender_name,
+    search,
+):
+    if has_empty_category_selection:
+        return queryset.none()
+
+    if categories:
+        category_filter = Q(classified_category__in=[value for value in categories if value != "Uncategorised"])
+        if "Uncategorised" in categories:
+            category_filter |= _uncategorised_category_filter()
+        queryset = queryset.filter(category_filter)
+
+    if category:
+        if category == "Uncategorised":
+            queryset = queryset.filter(_uncategorised_category_filter())
+        else:
+            queryset = queryset.filter(classified_category=category)
+
+    if counterparty:
+        queryset = queryset.filter(counterparty__iexact=counterparty)
+
+    if spender_name:
+        queryset = queryset.filter(spender__iexact=spender_name)
+
+    if search:
+        amount_minor = _parse_amount_minor_units(search)
+        search_filter = Q(counterparty__icontains=search)
+        if amount_minor is not None:
+            if flow == "income":
+                search_filter |= Q(amount_minor_units=amount_minor)
+            else:
+                search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
+        queryset = queryset.filter(search_filter)
+
+    return queryset
+
+
+def _normalise_merchant_key(value):
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _normalise_counterparty_key(value):
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _apply_transaction_sorting(queryset, *, flow, sort_key, direction):
+    descending = direction == "desc"
+    default_tail = ["-transaction_time", "-feed_item_uid"]
+
+    if sort_key == "transactionTime":
+        return queryset.order_by(
+            "-transaction_time" if descending else "transaction_time",
+            "-feed_item_uid" if descending else "feed_item_uid",
+        )
+
+    if sort_key == "amountMinorUnits":
+        if flow == "spending":
+            primary = "amount_minor_units" if descending else "-amount_minor_units"
+        else:
+            primary = "-amount_minor_units" if descending else "amount_minor_units"
+        return queryset.order_by(primary, *default_tail)
+
+    if sort_key == "category":
+        queryset = queryset.annotate(
+            sort_value=Lower(
+                Case(
+                    When(
+                        Q(classified_category__isnull=True) | Q(classified_category=""),
+                        then=Value("Uncategorised"),
+                    ),
+                    default=F("classified_category"),
+                    output_field=CharField(),
+                )
+            )
+        )
+    elif sort_key == "counterparty":
+        queryset = queryset.annotate(sort_value=Lower(Coalesce("counterparty", Value(""))))
+    elif sort_key == "source":
+        queryset = queryset.annotate(sort_value=Lower(Coalesce("source", Value(""))))
+    elif sort_key == "spaceName":
+        space_name = Category.objects.filter(
+            account_uid=OuterRef("account_uid"),
+            category_type="space",
+            category_uid=OuterRef("space_uid"),
+        ).values("name")[:1]
+        queryset = queryset.annotate(
+            sort_value=Lower(
+                Coalesce(
+                    Subquery(space_name, output_field=CharField()),
+                    F("space_uid"),
+                    Value(""),
+                )
+            )
+        )
+    else:
+        raise ValueError("Invalid sort")
+
+    ordering = ["-sort_value" if descending else "sort_value", *default_tail]
+    return queryset.order_by(*ordering)
+
+
+def _earliest_feed_item_time():
+    return FeedItem.objects.aggregate(Min("transaction_time"))["transaction_time__min"]
 
 
 def _iter_json_paths(data, prefix=None, array_limit=5):
@@ -88,6 +439,10 @@ def _get_spending_category_options():
         .values_list("name", flat=True)
         .distinct()
     )
+    user_defined = list(
+        UserDefinedCategory.objects.values_list("name", flat=True)
+    )
+    options = sorted(set(options) | set(user_defined))
     if "Uncategorised" not in options:
         options.append("Uncategorised")
     return options
@@ -96,6 +451,18 @@ def _get_spending_category_options():
 def _next_rule_position():
     max_pos = ClassificationRule.objects.aggregate(Max("position"))["position__max"]
     return (max_pos or -1) + 1
+
+
+def _minor_units_to_form_amount(minor_units):
+    if minor_units is None:
+        return ""
+    return str((Decimal(minor_units) / Decimal("100")).quantize(AMOUNT_QUANTUM))
+
+
+def _form_amount_to_minor_units(amount):
+    if amount in {None, ""}:
+        return None
+    return int((amount * 100).quantize(Decimal("1")))
 
 
 def _get_rule_form_choices():
@@ -129,6 +496,20 @@ def _prepare_quick_rule_form(form, locked_rule_type=None):
 
 class ClassificationRuleForm(forms.ModelForm):
     rule_type = forms.ChoiceField(choices=RULE_TYPE_CHOICES, label="Rule type")
+    min_amount = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        label="Minimum amount (GBP)",
+        help_text="Optional inclusive lower bound in pounds. Use negative numbers for spending, for example enter -1.00 for a £1.00 card charge. This is stored internally as -100 minor units.",
+    )
+    max_amount = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        label="Maximum amount (GBP)",
+        help_text="Optional inclusive upper bound in pounds. Use negative numbers for spending, for example enter -1.00 for a £1.00 card charge. This is stored internally as -100 minor units.",
+    )
 
     class Meta:
         model = ClassificationRule
@@ -183,6 +564,32 @@ class ClassificationRuleForm(forms.ModelForm):
             "JSON path",
             help_text="Dot-separated path in the stored transaction payload.",
         )
+        if not self.is_bound:
+            if self.instance.pk and self.instance.min_amount_minor_units is not None:
+                self.initial.setdefault(
+                    "min_amount",
+                    _minor_units_to_form_amount(self.instance.min_amount_minor_units),
+                )
+            if self.instance.pk and self.instance.max_amount_minor_units is not None:
+                self.initial.setdefault(
+                    "max_amount",
+                    _minor_units_to_form_amount(self.instance.max_amount_minor_units),
+                )
+        self.order_fields(
+            [
+                "position",
+                "rule_type",
+                "category",
+                "reason",
+                "pattern",
+                "space_uid",
+                "json_path",
+                "min_amount",
+                "max_amount",
+                "start_date",
+                "end_date",
+            ]
+        )
 
     def _build_choice_field(self, field_name, choices, default_label, label, help_text=None, required=False):
         option_list = [("", default_label)] + list(choices)
@@ -210,6 +617,8 @@ class ClassificationRuleForm(forms.ModelForm):
         pattern = cleaned.get("pattern")
         space_uid = cleaned.get("space_uid")
         json_path = cleaned.get("json_path")
+        min_amount = cleaned.get("min_amount")
+        max_amount = cleaned.get("max_amount")
 
         if category == "":
             category = None
@@ -222,11 +631,28 @@ class ClassificationRuleForm(forms.ModelForm):
             json_path = None
             cleaned["json_path"] = None
 
-        if rule_type in {"counterparty_regex", "space_name_regex", "source_regex"}:
+        min_amount_minor_units = _form_amount_to_minor_units(min_amount)
+        max_amount_minor_units = _form_amount_to_minor_units(max_amount)
+        cleaned["min_amount_minor_units"] = min_amount_minor_units
+        cleaned["max_amount_minor_units"] = max_amount_minor_units
+        if (
+            min_amount_minor_units is not None
+            and max_amount_minor_units is not None
+            and min_amount_minor_units > max_amount_minor_units
+        ):
+            self.add_error("max_amount", "Maximum amount must be at least the minimum amount.")
+
+        if rule_type in {"counterparty_regex", "classified_category_regex", "space_name_regex", "source_regex"}:
             if not pattern:
                 self.add_error("pattern", "Provide a regular expression to match against.")
             if not category:
                 self.add_error("category", "Select the category to apply when the pattern matches.")
+
+        if rule_type == "amount_range":
+            if not category:
+                self.add_error("category", "Select the category to apply when the amount range matches.")
+            if min_amount_minor_units is None and max_amount_minor_units is None:
+                self.add_error("min_amount", "Provide at least one amount bound for an amount-range rule.")
 
         if rule_type == "space":
             if not space_uid:
@@ -244,6 +670,14 @@ class ClassificationRuleForm(forms.ModelForm):
             cleaned["category"] = category.strip() or None
 
         return cleaned
+
+    def save(self, commit=True):
+        rule = super().save(commit=False)
+        rule.min_amount_minor_units = self.cleaned_data.get("min_amount_minor_units")
+        rule.max_amount_minor_units = self.cleaned_data.get("max_amount_minor_units")
+        if commit:
+            rule.save()
+        return rule
 
 
 @require_GET
@@ -266,6 +700,7 @@ def categories_overview(request):
         "periods": period_options,
         "default_period": selected_period,
         "data_endpoint": reverse("spaces:categories-data"),
+        "user_categories": UserDefinedCategory.objects.all(),
     }
     return render(request, "spaces/categories.html", context)
 
@@ -283,6 +718,22 @@ def categories_data(request):
     summary = summarise_category_totals(period=period, reference_time=reference)
     payload = _build_category_payload(summary, period)
     return JsonResponse(payload)
+
+
+@require_POST
+def add_category(request):
+    name = request.POST.get("name", "").strip()
+    if not name:
+        return HttpResponse('<p class="add-category__error">Name is required.</p>')
+    if UserDefinedCategory.objects.filter(name=name).exists():
+        return HttpResponse(f'<p class="add-category__error">&ldquo;{name}&rdquo; already exists.</p>')
+    UserDefinedCategory.objects.create(name=name)
+    all_categories = UserDefinedCategory.objects.order_by("name")
+    items = "".join(f'<li>{c.name}</li>' for c in all_categories)
+    return HttpResponse(
+        f'<ul class="add-category__list">{items}</ul>'
+        f'<p class="add-category__success">&ldquo;{name}&rdquo; added.</p>'
+    )
 
 
 @require_GET
@@ -309,17 +760,19 @@ def income(request, category_name=None, counterparty_name=None):
 
 @require_GET
 def cashflow(request):
-    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    default_days = 365
     try:
-        _, _, days, _ = _resolve_time_window(request, default_days)
+        _, _, days, _, cashflow_range = _resolve_cashflow_time_window(request, default_days)
     except ValueError:
         days = default_days
+        cashflow_range = "year"
 
     return render(
         request,
         "spaces/cashflow.html",
         {
             "summary_days": days,
+            "cashflow_range": cashflow_range,
             "category_options": _get_spending_category_options(),
             "transactions_page_size": TRANSACTIONS_PAGE_SIZE,
             "spending_page_url": reverse("spaces:spending"),
@@ -329,6 +782,7 @@ def cashflow(request):
 
 
 @require_GET
+@ensure_csrf_cookie
 def savings(request):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
@@ -342,6 +796,32 @@ def savings(request):
         {
             "summary_days": days,
             "data_endpoint": reverse("spaces:savings-data"),
+            "dismiss_endpoint": reverse("spaces:savings-dismissals"),
+        },
+    )
+
+
+@require_GET
+def holidays(request):
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    earliest_transaction_time = _earliest_feed_item_time()
+    try:
+        _, _, days, _ = _resolve_time_window(request, default_days)
+    except ValueError:
+        days = default_days
+
+    return render(
+        request,
+        "spaces/holidays.html",
+        {
+            "summary_days": days,
+            "data_endpoint": reverse("spaces:holidays-data"),
+            "feedback_endpoint": reverse("spaces:holidays-feedback"),
+            "merchant_override_endpoint": reverse("spaces:holidays-merchant-overrides"),
+            "show_reviewed": request.GET.get("show_reviewed") == "1",
+            "range_options": HOLIDAY_RANGE_OPTIONS,
+            "earliest_transaction_time": earliest_transaction_time.isoformat() if earliest_transaction_time else "",
+            "category_options": _get_spending_category_options(),
         },
     )
 
@@ -354,7 +834,7 @@ def _render_cashflow_page(request, *, template_name, base_view_name, category_na
         days = default_days
 
     search_query = (request.GET.get("search") or "").strip()
-
+    spender_key, _ = _resolve_spender_filter(request.GET.get("spender"))
     category_options = _get_spending_category_options()
     counterparty_template = reverse(f"spaces:{base_view_name}-counterparty", args=["__counterparty__"])
     counterparty_base = counterparty_template.rsplit("__counterparty__", 1)[0]
@@ -367,6 +847,7 @@ def _render_cashflow_page(request, *, template_name, base_view_name, category_na
             "initial_category": category_name or "",
             "initial_counterparty": counterparty_name or "",
             "initial_search": search_query,
+            "initial_spender": spender_key,
             "base_spending_url": reverse(f"spaces:{base_view_name}"),
             "counterparty_base_url": counterparty_base,
             "category_options": category_options,
@@ -380,6 +861,7 @@ def spending_data(request):
     default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
         window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+        spender_key, spender_name = _resolve_spender_filter(request.GET.get("spender"), strict=True)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -387,7 +869,9 @@ def spending_data(request):
         days=days,
         reference_time=reference,
         start_time=window_start,
+        spender=spender_name,
     )
+    summary["spender"] = spender_key
     return JsonResponse(summary)
 
 
@@ -410,12 +894,12 @@ def income_data(request):
 @require_GET
 def cashflow_data(request):
     income_scope = (request.GET.get("income_scope") or "salary").strip().lower()
-    if income_scope not in {"salary", "all"}:
+    if income_scope not in {"salary", "payments", "all"}:
         return JsonResponse({"error": "Invalid income scope"}, status=400)
 
-    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    default_days = 365
     try:
-        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+        window_start, window_end, days, reference, cashflow_range = _resolve_cashflow_time_window(request, default_days)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -425,7 +909,112 @@ def cashflow_data(request):
         start_time=window_start,
         income_scope=income_scope,
     )
+    summary["range"] = cashflow_range
     return JsonResponse(summary)
+
+
+@require_GET
+def holidays_data(request):
+    confidence_mode = (request.GET.get("confidence") or "balanced").strip().lower()
+    if confidence_mode not in SAVINGS_CONFIDENCE_MODES:
+        return JsonResponse({"error": "Invalid confidence mode"}, status=400)
+
+    scope = (request.GET.get("scope") or "all").strip().lower()
+    if scope not in HOLIDAY_SCOPES:
+        return JsonResponse({"error": "Invalid scope"}, status=400)
+    show_reviewed = request.GET.get("show_reviewed") == "1"
+
+    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    try:
+        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    payload = calculate_holiday_signals(
+        days=days,
+        reference_time=reference,
+        start_time=window_start,
+        confidence_mode=confidence_mode,
+        scope=scope,
+        include_reviewed=show_reviewed,
+    )
+    return JsonResponse(payload)
+
+
+@require_POST
+def holiday_feedback(request):
+    try:
+        payload = _parse_json_request_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    feed_ids = payload.get("feedItemUids")
+    decision = (payload.get("decision") or "").strip().lower()
+    if decision not in HOLIDAY_FEEDBACK_DECISIONS:
+        return JsonResponse({"error": "decision is required"}, status=400)
+    if not isinstance(feed_ids, list) or not feed_ids:
+        return JsonResponse({"error": "feedItemUids is required"}, status=400)
+
+    valid_ids = sorted({uid.strip() for uid in feed_ids if isinstance(uid, str) and uid.strip()})
+    if not valid_ids:
+        return JsonResponse({"error": "no valid feedItemUids provided"}, status=400)
+
+    existing_ids = set(
+        FeedItem.objects.filter(feed_item_uid__in=valid_ids).values_list("feed_item_uid", flat=True)
+    )
+    updated = 0
+    for feed_item_uid in sorted(existing_ids):
+        HolidaySuggestionDecision.objects.update_or_create(
+            feed_item_uid=feed_item_uid,
+            defaults={"decision": decision},
+        )
+        updated += 1
+
+    return JsonResponse({"updated": updated, "decision": decision})
+
+
+@require_POST
+def holiday_merchant_overrides(request):
+    try:
+        payload = _parse_json_request_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    override_type = (payload.get("overrideType") or "").strip().lower()
+    merchants = payload.get("merchants")
+    if override_type not in HOLIDAY_MERCHANT_OVERRIDE_TYPES:
+        return JsonResponse({"error": "overrideType is required"}, status=400)
+    if not isinstance(merchants, list) or not merchants:
+        return JsonResponse({"error": "merchants is required"}, status=400)
+
+    cleaned_merchants = {}
+    for merchant in merchants:
+        if not isinstance(merchant, dict):
+            continue
+        merchant_key = merchant.get("merchantKey")
+        if not isinstance(merchant_key, str):
+            continue
+        normalised_key = _normalise_merchant_key(merchant_key)
+        if not normalised_key:
+            continue
+        label = merchant.get("label")
+        cleaned_merchants[normalised_key] = label.strip() if isinstance(label, str) and label.strip() else None
+
+    if not cleaned_merchants:
+        return JsonResponse({"error": "no valid merchants provided"}, status=400)
+
+    updated = 0
+    for merchant_key, label in sorted(cleaned_merchants.items()):
+        HolidayMerchantOverride.objects.update_or_create(
+            merchant_key=merchant_key,
+            defaults={
+                "label": label,
+                "override_type": override_type,
+            },
+        )
+        updated += 1
+
+    return JsonResponse({"updated": updated, "overrideType": override_type})
 
 
 @require_GET
@@ -462,6 +1051,32 @@ def savings_data(request):
     return JsonResponse(payload)
 
 
+@require_POST
+def savings_dismissals(request):
+    try:
+        payload = _parse_json_request_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    signal_type = (payload.get("signalType") or "").strip().lower()
+    signal_key = (payload.get("signalKey") or "").strip().lower()
+    label = payload.get("label")
+
+    if signal_type not in SAVINGS_DISMISSIBLE_SIGNAL_TYPES:
+        return JsonResponse({"error": "signalType is required"}, status=400)
+    if not signal_key:
+        return JsonResponse({"error": "signalKey is required"}, status=400)
+
+    SavingsSignalDismissal.objects.update_or_create(
+        signal_type=signal_type,
+        signal_key=signal_key,
+        defaults={
+            "label": label.strip() if isinstance(label, str) and label.strip() else None,
+        },
+    )
+    return JsonResponse({"saved": True, "signalType": signal_type, "signalKey": signal_key})
+
+
 @require_GET
 def spending_transactions(request):
     return _cashflow_transactions(request, flow="spending")
@@ -476,7 +1091,7 @@ def income_transactions(request):
 def cashflow_transactions(request):
     flow = (request.GET.get("flow") or "both").strip().lower()
     income_scope = (request.GET.get("income_scope") or "salary").strip().lower()
-    if income_scope not in {"salary", "all"}:
+    if income_scope not in {"salary", "payments", "all"}:
         return JsonResponse({"error": "Invalid income scope"}, status=400)
     return _cashflow_transactions(request, flow=flow, income_scope=income_scope)
 
@@ -555,86 +1170,109 @@ def things_to_do_transactions(request):
 def _cashflow_transactions(request, *, flow, income_scope="all"):
     if flow not in {"spending", "income", "both"}:
         return JsonResponse({"error": "Unsupported flow"}, status=400)
-    if income_scope not in {"salary", "all"}:
+    if income_scope not in {"salary", "payments", "all"}:
         return JsonResponse({"error": "Unsupported income scope"}, status=400)
 
     category = request.GET.get("category")
+    categories = [value.strip() for value in request.GET.getlist("categories") if value and value.strip()]
+    has_empty_category_selection = EMPTY_CATEGORY_SELECTION_TOKEN in categories
+    if has_empty_category_selection:
+        categories = [value for value in categories if value != EMPTY_CATEGORY_SELECTION_TOKEN]
     counterparty = request.GET.get("counterparty")
     search = (request.GET.get("search") or "").strip()
     try:
         page = _parse_positive_int(request.GET.get("page"), 1)
+        spender_key, spender_name = _resolve_spender_filter(request.GET.get("spender"), strict=True)
+        sort_key, sort_direction = _resolve_transaction_sort(
+            request.GET.get("sort"),
+            request.GET.get("direction"),
+        )
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    default_days = max(settings.STARLING_SUMMARY_DAYS, 365)
+    default_days = 365 if flow == "both" else max(settings.STARLING_SUMMARY_DAYS, 365)
     try:
-        window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+        if flow == "both":
+            window_start, window_end, days, reference, cashflow_range = _resolve_cashflow_time_window(
+                request,
+                default_days,
+            )
+        else:
+            window_start, window_end, days, reference = _resolve_time_window(request, default_days)
+            cashflow_range = None
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     reference_time = reference or datetime.now(timezone.utc)
 
-    queryset = (
-        FeedItem.objects.filter(
-            transaction_time__gte=window_start,
-            transaction_time__lt=window_end,
-        )
-        .annotate(source_upper=Upper("source"))
-        .exclude(source_upper__in=EXCLUDED_TRANSFER_SOURCES)
-        .order_by("-transaction_time", "-feed_item_uid")
+    filtered_queryset = _apply_transaction_flow_filter(
+        _base_transactions_queryset(),
+        flow=flow,
+        income_scope=income_scope,
     )
-    if flow == "income":
-        queryset = queryset.filter(amount_minor_units__gt=0)
-        if income_scope == "salary":
-            queryset = queryset.filter(classified_category__icontains="salary")
-    elif flow == "spending":
-        queryset = queryset.filter(amount_minor_units__lt=0)
-    elif income_scope == "salary":
-        queryset = queryset.filter(
-            Q(amount_minor_units__lt=0)
-            | (Q(amount_minor_units__gt=0) & Q(classified_category__icontains="salary"))
+    filtered_queryset = _apply_transaction_filters(
+        filtered_queryset,
+        flow=flow,
+        category=category,
+        categories=categories,
+        has_empty_category_selection=has_empty_category_selection,
+        counterparty=counterparty,
+        spender_name=spender_name,
+        search=search,
+    )
+    window_queryset = filtered_queryset.filter(
+        transaction_time__gte=window_start,
+        transaction_time__lt=window_end,
+    )
+
+    sorted_queryset = _apply_transaction_sorting(
+        window_queryset,
+        flow=flow,
+        sort_key=sort_key,
+        direction=sort_direction,
+    )
+    summary = _build_flow_summary(queryset=window_queryset, flow=flow, days=days)
+    if summary is not None:
+        summary["periodComparison"] = _build_period_comparison(
+            queryset=filtered_queryset,
+            flow=flow,
+            reference=reference_time,
         )
-
-    if category:
-        if category == "Uncategorised":
-            queryset = queryset.filter(_uncategorised_category_filter())
-        else:
-            queryset = queryset.filter(classified_category=category)
-
-    if counterparty:
-        queryset = queryset.filter(counterparty__iexact=counterparty)
-
-    if search:
-        amount_minor = _parse_amount_minor_units(search)
-        search_filter = Q(counterparty__icontains=search)
-        if amount_minor is not None:
-            if flow == "spending":
-                search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
-            elif flow == "income":
-                search_filter |= Q(amount_minor_units=amount_minor)
-            else:
-                search_filter |= Q(amount_minor_units=-amount_minor) | Q(amount_minor_units=amount_minor)
-        queryset = queryset.filter(search_filter)
-
-    total_count = queryset.count()
+    total_count = window_queryset.count()
     total_pages = max(1, math.ceil(total_count / TRANSACTIONS_PAGE_SIZE))
     if page > total_pages:
         return JsonResponse({"error": "page is out of range"}, status=400)
     page_start = (page - 1) * TRANSACTIONS_PAGE_SIZE
     page_end = page_start + TRANSACTIONS_PAGE_SIZE
+    page_items = list(sorted_queryset[page_start:page_end])
 
     space_names = {
         (cat.account_uid, cat.category_uid): cat.name
         for cat in Category.objects.filter(category_type="space")
     }
+    counterparty_keys = {
+        _normalise_counterparty_key(item.counterparty)
+        for item in page_items
+        if item.counterparty
+    }
+    counterparty_notes = {
+        note.counterparty_key: note.note
+        for note in CounterpartyNote.objects.filter(counterparty_key__in=counterparty_keys)
+    }
+    transaction_notes = {
+        note.feed_item_id: note.note
+        for note in TransactionNote.objects.filter(feed_item_id__in=[item.feed_item_uid for item in page_items])
+    }
 
     transactions = []
-    for item in queryset[page_start:page_end]:
+    for item in page_items:
         space_name = space_names.get((item.account_uid, item.space_uid))
+        counterparty_note = counterparty_notes.get(_normalise_counterparty_key(item.counterparty))
         transactions.append(
             {
                 "feedItemUid": item.feed_item_uid,
                 "transactionTime": item.transaction_time.isoformat(),
                 "counterparty": item.counterparty or "",
+                "counterpartyNote": counterparty_note or "",
                 "amountMinorUnits": int(
                     -item.amount_minor_units
                     if flow == "spending"
@@ -644,9 +1282,11 @@ def _cashflow_transactions(request, *, flow, income_scope="all"):
                 "spaceUid": item.space_uid or "",
                 "spaceName": space_name or "",
                 "source": item.source or "",
+                "spender": item.spender or "",
                 "classificationReason": item.classification_reason or "",
                 "category": item.classified_category or "Uncategorised",
                 "flow": "income" if item.amount_minor_units > 0 else "spending",
+                "transactionNote": transaction_notes.get(item.feed_item_uid, ""),
                 "raw": item.raw_json or {},
             }
         )
@@ -654,6 +1294,9 @@ def _cashflow_transactions(request, *, flow, income_scope="all"):
     response = {
         "flow": flow,
         "incomeScope": income_scope,
+        "range": cashflow_range,
+        "sort": sort_key,
+        "direction": sort_direction,
         "reference": reference_time.isoformat(),
         "days": days,
         "start": window_start.isoformat(),
@@ -667,13 +1310,82 @@ def _cashflow_transactions(request, *, flow, income_scope="all"):
         "hasPreviousPage": page > 1,
         "transactions": transactions,
     }
+    if summary is not None:
+        response["summary"] = summary
+    response["spender"] = spender_key
     if category:
         response["category"] = category
+    elif categories:
+        response["categories"] = categories
     if counterparty:
         response["counterparty"] = counterparty
     if search:
         response["search"] = search
     return JsonResponse(response)
+
+
+@require_POST
+def save_counterparty_note(request):
+    try:
+        payload = _parse_json_request_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    counterparty = (payload.get("counterparty") or "").strip()
+    if not counterparty:
+        return JsonResponse({"error": "counterparty is required"}, status=400)
+    note_text = (payload.get("note") or "").strip()
+    counterparty_key = _normalise_counterparty_key(counterparty)
+
+    if note_text:
+        record, _ = CounterpartyNote.objects.update_or_create(
+            counterparty_key=counterparty_key,
+            defaults={"counterparty": counterparty, "note": note_text},
+        )
+        return JsonResponse(
+            {
+                "counterparty": record.counterparty,
+                "counterpartyKey": record.counterparty_key,
+                "note": record.note,
+            }
+        )
+
+    CounterpartyNote.objects.filter(counterparty_key=counterparty_key).delete()
+    return JsonResponse(
+        {
+            "counterparty": counterparty,
+            "counterpartyKey": counterparty_key,
+            "note": "",
+        }
+    )
+
+
+@require_POST
+def save_transaction_note(request):
+    try:
+        payload = _parse_json_request_body(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    feed_item_uid = (payload.get("feedItemUid") or "").strip()
+    if not feed_item_uid:
+        return JsonResponse({"error": "feedItemUid is required"}, status=400)
+    note_text = (payload.get("note") or "").strip()
+
+    try:
+        item = FeedItem.objects.get(feed_item_uid=feed_item_uid)
+    except FeedItem.DoesNotExist:
+        return JsonResponse({"error": "Unknown transaction"}, status=404)
+
+    if note_text:
+        record, _ = TransactionNote.objects.update_or_create(
+            feed_item=item,
+            defaults={"note": note_text},
+        )
+        return JsonResponse({"feedItemUid": item.feed_item_uid, "note": record.note})
+
+    TransactionNote.objects.filter(feed_item=item).delete()
+    return JsonResponse({"feedItemUid": item.feed_item_uid, "note": ""})
 
 
 @require_POST
@@ -1003,3 +1715,37 @@ def _resolve_time_window(request, default_days):
     start = reference - timedelta(days=days)
     end = reference + timedelta(seconds=1)
     return start, end, days, reference
+
+
+def _resolve_cashflow_time_window(request, default_days):
+    range_key = (request.GET.get("range") or "year").strip().lower()
+    if range_key not in CASHFLOW_RANGE_OPTIONS:
+        raise ValueError("Invalid range")
+
+    start_raw = request.GET.get("start")
+    end_raw = request.GET.get("end")
+    if start_raw or end_raw:
+        start, end, days, reference = _resolve_time_window(request, default_days)
+        return start, end, days, reference, range_key
+
+    reference = _parse_reference_time(request.GET.get("reference"))
+    if reference is None:
+        reference = datetime.now(timezone.utc)
+
+    if range_key == "all":
+        earliest = _earliest_feed_item_time()
+        if earliest is None:
+            start = reference - timedelta(days=default_days)
+            end = reference + timedelta(seconds=1)
+            return start, end, default_days, reference, range_key
+        start = _normalize_to_utc(earliest)
+        end = reference + timedelta(seconds=1)
+        if end <= start:
+            end = start + timedelta(seconds=1)
+        seconds = (end - start).total_seconds()
+        days = max(1, math.ceil(seconds / 86400))
+        return start, end, days, reference, range_key
+
+    start = reference - timedelta(days=default_days)
+    end = reference + timedelta(seconds=1)
+    return start, end, default_days, reference, range_key

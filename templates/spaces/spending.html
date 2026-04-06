@@ -144,6 +144,101 @@
       color: #34d399;
       outline: none;
     }
+    .counterparty-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.35rem;
+    }
+    .counterparty-actions,
+    .note-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .amount-cell-content {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+    }
+    .inline-note-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 0.72rem;
+      line-height: 1.2;
+      cursor: help;
+      max-width: 24ch;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .inline-note-button {
+      background: transparent;
+      border: 1px dashed #cbd5e1;
+      border-radius: 999px;
+      color: #475569;
+      cursor: pointer;
+      font-size: 0.72rem;
+      line-height: 1.2;
+      padding: 0.15rem 0.5rem;
+    }
+    .inline-note-button:hover,
+    .inline-note-button:focus {
+      border-color: #34d399;
+      color: #0f172a;
+      outline: none;
+    }
+    .inline-note-editor {
+      display: grid;
+      gap: 0.4rem;
+      margin-top: 0.35rem;
+      width: min(100%, 20rem);
+    }
+    .inline-note-editor textarea {
+      width: 100%;
+      min-height: 4.5rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 0.5rem 0.65rem;
+      resize: vertical;
+      font: inherit;
+      color: #0f172a;
+      background: #ffffff;
+    }
+    .inline-note-editor__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .inline-note-editor__actions button {
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .inline-note-editor__actions .save {
+      border: none;
+      background: #34d399;
+      color: #101215;
+      font-weight: 600;
+    }
+    .inline-note-editor__actions .cancel {
+      border: 1px solid #cbd5e1;
+      background: transparent;
+      color: #334155;
+    }
+    .inline-note-editor__status {
+      color: #b91c1c;
+      font-size: 0.8rem;
+      min-height: 1rem;
+      text-align: left;
+    }
     .quick-rule-feedback {
       margin-top: 0.75rem;
       color: #64748b;
@@ -272,6 +367,276 @@
     body.modal-open {
       overflow: hidden;
     }
+    .spending-summary {
+      margin: 1rem 0;
+      display: grid;
+      gap: 0.75rem;
+    }
+    .spending-summary__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .spending-summary__controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.45rem;
+    }
+    .spending-summary__eyebrow {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .spending-summary__title {
+      margin: 0.2rem 0 0;
+      color: #0f172a;
+      font-size: 1.1rem;
+    }
+    .spending-summary__period {
+      margin: 0;
+      color: #475569;
+      font-size: 0.9rem;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+    }
+    .summary-card {
+      background: #f8fafc;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .summary-card__label {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .summary-card__value {
+      margin: 0.2rem 0 0;
+      color: #0f172a;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .year-comparison {
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 0;
+      display: grid;
+      gap: 0.85rem;
+    }
+    .year-comparison[open] {
+      padding: 0.9rem 1rem;
+    }
+    .year-comparison__summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.9rem 1rem;
+      cursor: pointer;
+      list-style: none;
+    }
+    .year-comparison__summary::-webkit-details-marker {
+      display: none;
+    }
+    .year-comparison__summary::after {
+      content: "Show";
+      color: #334155;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .year-comparison[open] .year-comparison__summary {
+      padding: 0 0 0.85rem;
+    }
+    .year-comparison[open] .year-comparison__summary::after {
+      content: "Hide";
+    }
+    .year-comparison__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .year-comparison__title {
+      margin: 0;
+      color: #0f172a;
+      font-size: 1rem;
+    }
+    .year-comparison__period {
+      margin: 0.15rem 0 0;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
+    .year-comparison__stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+    }
+    .year-comparison__stat {
+      background: #ffffff;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .year-comparison__stat-label {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .year-comparison__stat-value {
+      margin: 0.2rem 0 0;
+      color: #0f172a;
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+    .year-comparison__table-wrap {
+      overflow-x: auto;
+    }
+    .year-comparison__table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .year-comparison__table th,
+    .year-comparison__table td {
+      padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid #dbe3ef;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .year-comparison__table td.numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .spending-layout {
+      display: grid;
+      gap: 1rem;
+    }
+    .spending-visuals {
+      min-width: 0;
+    }
+    .category-sidebar {
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 0.85rem 0.9rem;
+      display: grid;
+      gap: 0.75rem;
+      align-content: start;
+    }
+    .category-sidebar__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .category-sidebar__title {
+      margin: 0;
+      color: #0f172a;
+      font-size: 1rem;
+    }
+    .category-sidebar__actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .category-sidebar__actions button {
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #334155;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.3rem 0.7rem;
+    }
+    .category-sidebar__actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .category-sidebar__list {
+      display: grid;
+      gap: 0.45rem;
+      max-height: 28rem;
+      overflow: auto;
+      padding-right: 0.15rem;
+    }
+    .category-sidebar__item {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.92rem;
+      color: #0f172a;
+    }
+    .category-sidebar__item input {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .category-sidebar__swatch {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+    }
+    .category-sidebar__name {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .category-sidebar__empty {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
+    .sidebar-filter-section {
+      display: grid;
+      gap: 0.55rem;
+      padding-top: 0.25rem;
+      border-top: 1px solid #dbe3ef;
+    }
+    .sidebar-filter-section__title {
+      margin: 0;
+      color: #334155;
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .sidebar-spender-filter {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .sidebar-spender-filter button {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 0.3rem 0.75rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    .sidebar-spender-filter button.is-active {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
     .overview-container {
       margin-top: 1.25rem;
       position: relative;
@@ -351,32 +716,188 @@
       font-size: 0.9rem;
       font-weight: 600;
     }
+    .chart-display-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      color: #334155;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .chart-display-toggle input {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .chart-split-legend {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+      color: #475569;
+      font-size: 0.82rem;
+    }
+    .chart-split-legend[hidden] {
+      display: none;
+    }
+    .chart-split-legend__item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .chart-split-legend__swatch {
+      width: 1rem;
+      height: 0.8rem;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #cbd5e1, #94a3b8);
+      border: 2px solid transparent;
+    }
+    .chart-split-legend__swatch--seb {
+      border-color: rgba(13, 148, 136, 0.85);
+      box-shadow: 0 0 10px rgba(13, 148, 136, 0.35);
+    }
+    .chart-split-legend__swatch--kim {
+      border-color: rgba(217, 119, 6, 0.9);
+      box-shadow: 0 0 10px rgba(217, 119, 6, 0.3);
+    }
+    @media (min-width: 960px) {
+      .spending-layout {
+        grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+        align-items: start;
+      }
+      .category-sidebar {
+        position: sticky;
+        top: 1rem;
+      }
+    }
   </style>
 
-  <section class="card">
-    <div class="category-limit-control">
-      <label for="top-category-slider">Categories shown</label>
-      <input
-        id="top-category-slider"
-        type="range"
-        min="5"
-        max="10"
-        step="1"
-        value="10"
-      />
-      <div class="category-limit-control__bounds" aria-hidden="true">
-        <span>5</span>
-        <span>Show all</span>
+  <section class="spending-summary" aria-labelledby="spending-summary-title">
+    <div class="spending-summary__header">
+      <div>
+        <p class="spending-summary__eyebrow">Selected spending</p>
+        <h2 class="spending-summary__title" id="spending-summary-title">All spending</h2>
       </div>
-      <p class="category-limit-control__value" id="top-category-value">Top 10 categories</p>
+      <div class="spending-summary__controls">
+        <p class="spending-summary__period" id="spending-summary-period">Selected period</p>
+      </div>
     </div>
-    <canvas id="spending-chart" height="320"></canvas>
-    <div class="overview-container" id="overview-container">
-      <canvas id="spending-overview-chart" height="80"></canvas>
-      <div class="brush-hitbox" id="brush-hitbox">
-        <div class="brush-selection" id="brush-selection">
-          <span class="brush-handle" id="brush-handle-start" aria-hidden="true"></span>
-          <span class="brush-handle" id="brush-handle-end" aria-hidden="true"></span>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <p class="summary-card__label">Total spend</p>
+        <p class="summary-card__value" id="summary-total-spending">£0.00</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Average / month</p>
+        <p class="summary-card__value" id="summary-average-monthly-spending">£0.00</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Average / year</p>
+        <p class="summary-card__value" id="summary-average-annual-spending">£0.00</p>
+      </div>
+    </div>
+    <details class="year-comparison" id="spending-year-comparison">
+      <summary class="year-comparison__summary">
+        <div>
+          <h3 class="year-comparison__title">Last 12 Months vs Previous 12 Months</h3>
+          <p class="year-comparison__period" id="spending-year-comparison-period">Trailing full-month comparison</p>
+        </div>
+      </summary>
+      <div class="year-comparison__content">
+        <div class="year-comparison__stats">
+          <div class="year-comparison__stat">
+            <p class="year-comparison__stat-label">Current period total</p>
+            <p class="year-comparison__stat-value" id="spending-year-current-total">£0.00</p>
+          </div>
+          <div class="year-comparison__stat">
+            <p class="year-comparison__stat-label">Previous period total</p>
+            <p class="year-comparison__stat-value" id="spending-year-previous-total">£0.00</p>
+          </div>
+          <div class="year-comparison__stat">
+            <p class="year-comparison__stat-label">Current period avg / month</p>
+            <p class="year-comparison__stat-value" id="spending-year-current-average">£0.00</p>
+          </div>
+          <div class="year-comparison__stat">
+            <p class="year-comparison__stat-label">Previous period avg / month</p>
+            <p class="year-comparison__stat-value" id="spending-year-previous-average">£0.00</p>
+          </div>
+        </div>
+        <div class="year-comparison__table-wrap">
+          <table class="year-comparison__table" id="spending-year-comparison-table">
+            <thead>
+              <tr>
+                <th scope="col">Month</th>
+                <th scope="col" class="numeric">Current period</th>
+                <th scope="col" class="numeric">Previous period</th>
+              </tr>
+            </thead>
+            <tbody id="spending-year-comparison-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="spending-layout">
+      <aside class="category-sidebar" id="category-sidebar" aria-labelledby="category-sidebar-title">
+        <div class="category-sidebar__header">
+          <h2 class="category-sidebar__title" id="category-sidebar-title">Categories</h2>
+          <div class="category-sidebar__actions">
+            <button type="button" id="category-select-all">Select all</button>
+            <button type="button" id="category-clear-all">Clear all</button>
+          </div>
+        </div>
+        <div class="category-sidebar__list" id="category-sidebar-list"></div>
+        <div class="sidebar-filter-section">
+          <p class="sidebar-filter-section__title">Card used</p>
+          <div class="sidebar-spender-filter" id="sidebar-spender-filter" role="group" aria-label="Card used filter">
+            <button type="button" data-spender="both">Both</button>
+            <button type="button" data-spender="seb">Seb</button>
+            <button type="button" data-spender="kim">Kim</button>
+          </div>
+        </div>
+      </aside>
+      <div class="spending-visuals">
+        <div class="category-limit-control">
+          <label for="top-category-slider">Categories shown</label>
+          <input
+            id="top-category-slider"
+            type="range"
+            min="5"
+            max="10"
+            step="1"
+            value="10"
+          />
+          <div class="category-limit-control__bounds" aria-hidden="true">
+            <span>5</span>
+            <span>Show all</span>
+          </div>
+          <p class="category-limit-control__value" id="top-category-value">Top 10 categories</p>
+          <label class="chart-display-toggle" for="split-by-card-used">
+            <input id="split-by-card-used" type="checkbox" />
+            <span>Split by card used</span>
+          </label>
+          <div class="chart-split-legend" id="chart-split-legend" hidden aria-live="polite">
+            <span class="chart-split-legend__item">
+              <span class="chart-split-legend__swatch chart-split-legend__swatch--seb" aria-hidden="true"></span>
+              <span>Seb outline</span>
+            </span>
+            <span class="chart-split-legend__item">
+              <span class="chart-split-legend__swatch chart-split-legend__swatch--kim" aria-hidden="true"></span>
+              <span>Kim outline</span>
+            </span>
+          </div>
+        </div>
+        <canvas id="spending-chart" height="320"></canvas>
+        <div class="overview-container" id="overview-container">
+          <canvas id="spending-overview-chart" height="80"></canvas>
+          <div class="brush-hitbox" id="brush-hitbox">
+            <div class="brush-selection" id="brush-selection">
+              <span class="brush-handle" id="brush-handle-start" aria-hidden="true"></span>
+              <span class="brush-handle" id="brush-handle-end" aria-hidden="true"></span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -398,6 +919,7 @@
           <th scope="col" data-sort-key="counterparty" aria-sort="none">Counterparty</th>
           <th scope="col" data-sort-key="spaceName" aria-sort="none">Space</th>
           <th scope="col" data-sort-key="source" aria-sort="none">Source</th>
+          <th scope="col" id="transaction-spender-column" hidden>Card used</th>
           <th scope="col" class="numeric" data-sort-key="amountMinorUnits" aria-sort="none">Amount</th>
         </tr>
       </thead>
@@ -443,6 +965,8 @@
     const spendingDataEndpoint = "{% url 'spaces:spending-data' %}";
     const transactionsEndpoint = "{% url 'spaces:spending-transactions' %}";
     const transactionsRecategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const counterpartyNoteEndpoint = "{% url 'spaces:spending-counterparty-note' %}";
+    const transactionNoteEndpoint = "{% url 'spaces:spending-transaction-note' %}";
     const rulesPageBase = "{% url 'spaces:classification-rules' %}";
     const quickRuleEndpoint = "{% url 'spaces:classification-rules-quick' %}";
     const summaryDaysDefault = {{ summary_days }};
@@ -455,6 +979,7 @@
     const initialCategory = "{{ initial_category|escapejs }}";
     const initialCounterparty = "{{ initial_counterparty|escapejs }}";
     const initialSearch = "{{ initial_search|escapejs }}";
+    const initialSpender = "{{ initial_spender|escapejs }}";
     const baseSpendingUrl = "{{ base_spending_url|escapejs }}";
     const normalizedBasePath = baseSpendingUrl.endsWith('/') ? baseSpendingUrl : `${baseSpendingUrl}/`;
     const categoryPathBase = `${normalizedBasePath}category/`;
@@ -506,14 +1031,129 @@
     const transactionsPrevPage = document.getElementById('transactions-prev-page');
     const transactionsNextPage = document.getElementById('transactions-next-page');
     const transactionsPageInfo = document.getElementById('transactions-page-info');
+    const spendingSummaryTitle = document.getElementById('spending-summary-title');
+    const spendingSummaryPeriod = document.getElementById('spending-summary-period');
+    const spendingSummaryTotal = document.getElementById('summary-total-spending');
+    const spendingSummaryAverageMonthly = document.getElementById('summary-average-monthly-spending');
+    const spendingSummaryAverageAnnual = document.getElementById('summary-average-annual-spending');
+    const spendingYearComparisonPeriod = document.getElementById('spending-year-comparison-period');
+    const spendingYearCurrentTotal = document.getElementById('spending-year-current-total');
+    const spendingYearPreviousTotal = document.getElementById('spending-year-previous-total');
+    const spendingYearCurrentAverage = document.getElementById('spending-year-current-average');
+    const spendingYearPreviousAverage = document.getElementById('spending-year-previous-average');
+    const spendingYearComparisonBody = document.getElementById('spending-year-comparison-body');
+    const categorySidebarList = document.getElementById('category-sidebar-list');
+    const sidebarSpenderFilter = document.getElementById('sidebar-spender-filter');
+    const categorySelectAllButton = document.getElementById('category-select-all');
+    const categoryClearAllButton = document.getElementById('category-clear-all');
     const quickRuleModal = document.getElementById('quick-rule-modal');
     const quickRuleContent = document.getElementById('quick-rule-modal-content');
     const quickRuleFeedback = document.getElementById('quick-rule-feedback');
     const topCategorySlider = document.getElementById('top-category-slider');
     const topCategoryValue = document.getElementById('top-category-value');
+    const splitByCardUsedToggle = document.getElementById('split-by-card-used');
+    const chartSplitLegend = document.getElementById('chart-split-legend');
+    const transactionSpenderColumn = document.getElementById('transaction-spender-column');
     let quickRuleReturnFocus = null;
     let annualCategoryTotals = new Map();
     let annualCategoryCount = 0;
+    let currentSpender = initialSpender || 'both';
+    let availableChartCategories = [];
+    let visibleChartCategories = new Set();
+    let categorySelectionMode = 'all';
+    let activeNoteEditor = null;
+    let splitByCardUsed = false;
+
+    function getSpenderAccent(spenderKey) {
+      if (spenderKey === 'seb') {
+        return {
+          key: 'seb',
+          label: 'Seb',
+          borderColor: 'rgba(13, 148, 136, 0.95)',
+          shadowColor: 'rgba(13, 148, 136, 0.35)',
+        };
+      }
+      if (spenderKey === 'kim') {
+        return {
+          key: 'kim',
+          label: 'Kim',
+          borderColor: 'rgba(217, 119, 6, 0.95)',
+          shadowColor: 'rgba(217, 119, 6, 0.30)',
+        };
+      }
+      return {
+        key: '',
+        label: '',
+        borderColor: 'rgba(15, 23, 42, 0.18)',
+        shadowColor: 'transparent',
+      };
+    }
+
+    function withSplitAccent(dataset, spenderKey) {
+      const accent = getSpenderAccent(spenderKey);
+      return {
+        ...dataset,
+        spenderKey: accent.key,
+        spenderLabel: accent.label,
+        borderColor: accent.borderColor,
+        borderWidth: 2,
+        borderRadius: 6,
+        borderSkipped: false,
+        splitShadowColor: accent.shadowColor,
+        splitShadowBlur: 12,
+      };
+    }
+
+    function updateSplitLegend() {
+      if (!chartSplitLegend) {
+        return;
+      }
+      chartSplitLegend.hidden = !splitByCardUsed;
+    }
+
+    function normaliseSpender(value) {
+      const spender = (value || 'both').trim().toLowerCase();
+      if (spender === 'seb' || spender === 'kim') {
+        return spender;
+      }
+      return 'both';
+    }
+
+    function updateSidebarSpenderControls() {
+      if (!sidebarSpenderFilter) {
+        return;
+      }
+      sidebarSpenderFilter.querySelectorAll('button[data-spender]').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.spender === currentSpender);
+      });
+    }
+
+    const splitCardGlowPlugin = {
+      id: 'splitCardGlow',
+      beforeDatasetDraw(chart, args, options) {
+        if (!options?.enabled) {
+          return;
+        }
+        const dataset = chart.data.datasets[args.index];
+        if (!dataset?.spenderKey) {
+          return;
+        }
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.shadowColor = dataset.splitShadowColor || 'transparent';
+        ctx.shadowBlur = Number(dataset.splitShadowBlur || 0);
+      },
+      afterDatasetDraw(chart, args, options) {
+        if (!options?.enabled) {
+          return;
+        }
+        const dataset = chart.data.datasets[args.index];
+        if (!dataset?.spenderKey) {
+          return;
+        }
+        chart.ctx.restore();
+      },
+    };
 
     function openQuickRuleModal(params = {}) {
       if (!quickRuleModal || !quickRuleContent) {
@@ -657,6 +1297,9 @@
       if (params.reference) {
         query.set('reference', params.reference);
       }
+      if (currentSpender !== 'both') {
+        query.set('spender', currentSpender);
+      }
       const url = query.toString() ? `${spendingDataEndpoint}?${query.toString()}` : spendingDataEndpoint;
       const response = await fetch(url);
       if (!response.ok) {
@@ -722,8 +1365,360 @@
       return null;
     }
 
+    function normaliseCounterpartyKey(value) {
+      return (value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    }
+
+    function closeActiveNoteEditor() {
+      if (!activeNoteEditor) {
+        return;
+      }
+      if (activeNoteEditor.parentNode) {
+        activeNoteEditor.parentNode.removeChild(activeNoteEditor);
+      }
+      activeNoteEditor = null;
+    }
+
+    function updateCounterpartyNoteInCurrentTransactions(counterparty, note) {
+      const targetKey = normaliseCounterpartyKey(counterparty);
+      currentTransactions.forEach((txn) => {
+        if (normaliseCounterpartyKey(txn.counterparty) === targetKey) {
+          txn.counterpartyNote = note;
+        }
+      });
+    }
+
+    function updateTransactionNoteInCurrentTransactions(feedItemUid, note) {
+      currentTransactions.forEach((txn) => {
+        if (txn.feedItemUid === feedItemUid) {
+          txn.transactionNote = note;
+        }
+      });
+    }
+
+    async function postNote(endpoint, payload) {
+      const csrfToken = getCookie('csrftoken');
+      if (!csrfToken) {
+        throw new Error('Unable to determine CSRF token.');
+      }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        let message = 'Unable to save note.';
+        try {
+          const data = await response.json();
+          if (data.error) {
+            message = data.error;
+          }
+        } catch (error) {
+          console.error(error);
+        }
+        throw new Error(message);
+      }
+      return response.json();
+    }
+
+    function createNoteChip(note) {
+      const chip = document.createElement('span');
+      chip.classList.add('inline-note-chip');
+      chip.textContent = 'Note';
+      chip.title = note;
+      return chip;
+    }
+
+    function openInlineNoteEditor(container, options) {
+      closeActiveNoteEditor();
+
+      const form = document.createElement('form');
+      form.classList.add('inline-note-editor');
+      const textarea = document.createElement('textarea');
+      textarea.value = options.note || '';
+      textarea.placeholder = options.placeholder || '';
+      textarea.maxLength = 2000;
+      form.appendChild(textarea);
+
+      const status = document.createElement('div');
+      status.classList.add('inline-note-editor__status');
+      status.setAttribute('role', 'status');
+      form.appendChild(status);
+
+      const actions = document.createElement('div');
+      actions.classList.add('inline-note-editor__actions');
+
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.classList.add('cancel');
+      cancelButton.textContent = 'Cancel';
+      cancelButton.addEventListener('click', () => {
+        closeActiveNoteEditor();
+      });
+      actions.appendChild(cancelButton);
+
+      const saveButton = document.createElement('button');
+      saveButton.type = 'submit';
+      saveButton.classList.add('save');
+      saveButton.textContent = 'Save note';
+      actions.appendChild(saveButton);
+      form.appendChild(actions);
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        status.textContent = '';
+        saveButton.disabled = true;
+        cancelButton.disabled = true;
+        try {
+          await options.onSave(textarea.value);
+          closeActiveNoteEditor();
+          renderTransactionsTable();
+        } catch (error) {
+          status.textContent = error.message || 'Unable to save note.';
+          saveButton.disabled = false;
+          cancelButton.disabled = false;
+        }
+      });
+
+      container.appendChild(form);
+      activeNoteEditor = form;
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
+
+    function appendNoteControls(container, options) {
+      const controls = document.createElement('div');
+      controls.classList.add('note-controls');
+      if (options.note) {
+        controls.appendChild(createNoteChip(options.note));
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.classList.add('inline-note-button');
+      button.textContent = options.note ? 'Edit note' : 'Add note';
+      button.addEventListener('click', () => {
+        openInlineNoteEditor(container, options);
+      });
+      controls.appendChild(button);
+      container.appendChild(controls);
+    }
+
+    function formatCurrencyFromMinor(minorUnits, currency = 'GBP') {
+      const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency });
+      return formatter.format(Number(minorUnits || 0) / 100);
+    }
+
+    function formatSummaryDate(value) {
+      if (!value) {
+        return '';
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+      return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' }).format(date);
+    }
+
+    function describeSpendingFilter(filter) {
+      if (!filter || filter.type === 'all') {
+        return 'All spending';
+      }
+      if (filter.type === 'category') {
+        return `Category: ${filter.value}`;
+      }
+      if (filter.type === 'counterparty') {
+        return `Merchant: ${filter.value}`;
+      }
+      return filter.label || 'Selected spending';
+    }
+
+    function formatSummaryPeriod(start, end, periodDays) {
+      const startLabel = formatSummaryDate(start);
+      const endDate = end ? new Date(new Date(end).getTime() - 1000) : null;
+      const endLabel = endDate && !Number.isNaN(endDate.getTime())
+        ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' }).format(endDate)
+        : '';
+      const days = Number(periodDays || 0);
+
+      if (!startLabel || !endLabel) {
+        return days ? `${days} day${days === 1 ? '' : 's'}` : 'Selected period';
+      }
+      if (!days) {
+        return `${startLabel} to ${endLabel}`;
+      }
+      return `${startLabel} to ${endLabel} • ${days} day${days === 1 ? '' : 's'}`;
+    }
+
+    function formatYearComparisonPeriod(comparison) {
+      if (!comparison?.currentPeriod || !comparison?.previousPeriod) {
+        return 'Trailing full-month comparison';
+      }
+      return `${comparison.currentPeriod.label} vs ${comparison.previousPeriod.label}`;
+    }
+
+    function renderSpendingYearComparison(comparison, currency) {
+      const activeCurrency = currency || 'GBP';
+      const currentPeriod = comparison?.currentPeriod || {};
+      const previousPeriod = comparison?.previousPeriod || {};
+
+      if (spendingYearComparisonPeriod) {
+        spendingYearComparisonPeriod.textContent = formatYearComparisonPeriod(comparison);
+      }
+      if (spendingYearCurrentTotal) {
+        spendingYearCurrentTotal.textContent = formatCurrencyFromMinor(currentPeriod.totalMinorUnits || 0, activeCurrency);
+      }
+      if (spendingYearPreviousTotal) {
+        spendingYearPreviousTotal.textContent = formatCurrencyFromMinor(previousPeriod.totalMinorUnits || 0, activeCurrency);
+      }
+      if (spendingYearCurrentAverage) {
+        spendingYearCurrentAverage.textContent = formatCurrencyFromMinor(
+          currentPeriod.monthlyAverageMinorUnits || 0,
+          activeCurrency,
+        );
+      }
+      if (spendingYearPreviousAverage) {
+        spendingYearPreviousAverage.textContent = formatCurrencyFromMinor(
+          previousPeriod.monthlyAverageMinorUnits || 0,
+          activeCurrency,
+        );
+      }
+      if (!spendingYearComparisonBody) {
+        return;
+      }
+      const rows = comparison?.monthByMonth || [];
+      if (!rows.length) {
+        spendingYearComparisonBody.innerHTML = '<tr><td colspan="3">No year comparison available.</td></tr>';
+        return;
+      }
+      spendingYearComparisonBody.innerHTML = rows.map((row) => `
+        <tr>
+          <th scope="row">${row.label} / ${row.previousLabel}</th>
+          <td class="numeric">${formatCurrencyFromMinor(row.currentPeriodMinorUnits || 0, activeCurrency)}</td>
+          <td class="numeric">${formatCurrencyFromMinor(row.previousPeriodMinorUnits || 0, activeCurrency)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderSpendingSummary(filter, payload = {}) {
+      const summary = payload.summary || {};
+      const currency = summary.currency || 'GBP';
+      if (spendingSummaryTitle) {
+        spendingSummaryTitle.textContent = describeSpendingFilter(filter);
+      }
+      if (spendingSummaryPeriod) {
+        spendingSummaryPeriod.textContent = formatSummaryPeriod(payload.start, payload.end, summary.periodDays);
+      }
+      if (spendingSummaryTotal) {
+        spendingSummaryTotal.textContent = formatCurrencyFromMinor(summary.totalMinorUnits || 0, currency);
+      }
+      if (spendingSummaryAverageMonthly) {
+        spendingSummaryAverageMonthly.textContent = formatCurrencyFromMinor(
+          summary.averageMonthlyMinorUnits || 0,
+          currency,
+        );
+      }
+      if (spendingSummaryAverageAnnual) {
+        spendingSummaryAverageAnnual.textContent = formatCurrencyFromMinor(
+          summary.averageAnnualMinorUnits || 0,
+          currency,
+        );
+      }
+      renderSpendingYearComparison(summary.periodComparison, currency);
+    }
+
+    function showSpendingSummaryLoading(filter) {
+      if (spendingSummaryTitle) {
+        spendingSummaryTitle.textContent = describeSpendingFilter(filter);
+      }
+      if (spendingSummaryPeriod) {
+        spendingSummaryPeriod.textContent = 'Loading selected period…';
+      }
+      if (spendingSummaryTotal) {
+        spendingSummaryTotal.textContent = '…';
+      }
+      if (spendingSummaryAverageMonthly) {
+        spendingSummaryAverageMonthly.textContent = '…';
+      }
+      if (spendingSummaryAverageAnnual) {
+        spendingSummaryAverageAnnual.textContent = '…';
+      }
+      renderSpendingYearComparison(null, 'GBP');
+    }
+
+    function buildPageUrl(filter = currentFilter) {
+      let path = normalizedBasePath;
+      const params = new URLSearchParams();
+      if (currentSpender !== 'both') {
+        params.set('spender', currentSpender);
+      }
+      if (filter?.type === 'category') {
+        path = `${categoryPathBase}${encodeURIComponent(filter.value)}/`;
+      } else if (filter?.type === 'counterparty') {
+        path = `${counterpartyPathBase}${encodeURIComponent(filter.value)}/`;
+      } else if (filter?.type === 'search') {
+        params.set('search', filter.value);
+      }
+      const query = params.toString();
+      return query ? `${path}?${query}` : path;
+    }
+
+    function replaceCurrentUrl(filter = currentFilter) {
+      window.history.replaceState({}, '', buildPageUrl(filter));
+    }
+
+    function findRangeIndicesForDates(startDate, exclusiveEnd) {
+      if (!overviewSummary || !overviewSummary.dates.length) {
+        return { start: 0, end: 0 };
+      }
+      if (!startDate || !exclusiveEnd) {
+        return computeDefaultRangeIndices();
+      }
+      const endDate = new Date(exclusiveEnd.getTime() - 1);
+      let startIndex = overviewDates.findIndex((date) => date && date >= startDate);
+      if (startIndex === -1) {
+        startIndex = 0;
+      }
+      let endIndex = overviewDates.length - 1;
+      for (let index = overviewDates.length - 1; index >= 0; index -= 1) {
+        const date = overviewDates[index];
+        if (date && date <= endDate) {
+          endIndex = index;
+          break;
+        }
+      }
+      startIndex = Math.min(startIndex, endIndex);
+      return { start: startIndex, end: endIndex };
+    }
+
     function buildAllTransactionsFilter() {
       return { type: 'all', value: '', label: 'All transactions' };
+    }
+
+    function getSelectedSidebarCategories() {
+      if (!availableChartCategories.length) {
+        return [];
+      }
+      return availableChartCategories.filter((category) => visibleChartCategories.has(category));
+    }
+
+    function appendSelectedCategories(params) {
+      if (!availableChartCategories.length) {
+        return;
+      }
+      const selectedCategories = getSelectedSidebarCategories();
+      if (!selectedCategories.length) {
+        params.append('categories', '__none__');
+        return;
+      }
+      if (selectedCategories.length === availableChartCategories.length) {
+        return;
+      }
+      selectedCategories.forEach((selectedCategoryName) => {
+        params.append('categories', selectedCategoryName);
+      });
     }
 
     function resetTransactionsPaging(page = 1) {
@@ -933,6 +1928,18 @@
       return Number(fallbackTotal || 0);
     }
 
+    function rankSeriesItems(series) {
+      const items = Array.isArray(series) ? [...series] : [];
+      return items.sort((a, b) => {
+        const left = getRankingTotal(a.category, a.totalMinorUnits);
+        const right = getRankingTotal(b.category, b.totalMinorUnits);
+        if (left !== right) {
+          return right - left;
+        }
+        return (a.category || '').localeCompare(b.category || '', undefined, { sensitivity: 'base' });
+      });
+    }
+
     function buildCategoryDataset(item) {
       const minorValues = item.minorValues || [];
       return {
@@ -944,20 +1951,175 @@
       };
     }
 
-    function buildDefaultDatasets(series) {
-      const items = Array.isArray(series) ? [...series] : [];
+    function renderCategorySidebar() {
+      if (!categorySidebarList) {
+        return;
+      }
+      categorySidebarList.innerHTML = '';
+      if (!availableChartCategories.length) {
+        const empty = document.createElement('p');
+        empty.className = 'category-sidebar__empty';
+        empty.textContent = 'No categories in this selection.';
+        categorySidebarList.appendChild(empty);
+      } else {
+        availableChartCategories.forEach((category) => {
+          const label = document.createElement('label');
+          label.className = 'category-sidebar__item';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = visibleChartCategories.has(category);
+          checkbox.addEventListener('change', () => {
+            categorySelectionMode = 'custom';
+            if (checkbox.checked) {
+              visibleChartCategories.add(category);
+            } else {
+              visibleChartCategories.delete(category);
+            }
+            renderCategorySidebar();
+            if (chartMode === 'default') {
+              applyDefaultDatasets();
+            }
+            if (currentFilter) {
+              void loadTransactions(currentFilter, { page: 1, resetSort: false });
+            }
+          });
+          label.appendChild(checkbox);
+
+          const swatch = document.createElement('span');
+          swatch.className = 'category-sidebar__swatch';
+          swatch.style.backgroundColor = hashLabel(category);
+          label.appendChild(swatch);
+
+          const name = document.createElement('span');
+          name.className = 'category-sidebar__name';
+          name.textContent = category;
+          label.appendChild(name);
+
+          categorySidebarList.appendChild(label);
+        });
+      }
+
+      if (categorySelectAllButton) {
+        categorySelectAllButton.disabled = availableChartCategories.length === 0;
+      }
+      if (categoryClearAllButton) {
+        categoryClearAllButton.disabled = availableChartCategories.length === 0 || visibleChartCategories.size === 0;
+      }
+    }
+
+    function syncCategorySidebar(summary) {
+      const ranked = rankSeriesItems(summary?.series || []);
+      availableChartCategories = ranked.map((item) => item.category);
+      if (categorySelectionMode === 'all') {
+        visibleChartCategories = new Set(availableChartCategories);
+      } else {
+        visibleChartCategories = new Set(
+          availableChartCategories.filter((category) => visibleChartCategories.has(category)),
+        );
+      }
+      renderCategorySidebar();
+    }
+
+    function normaliseTxnSpender(value) {
+      const spender = (value || '').trim().toLowerCase();
+      if (spender === 'seb' || spender === 'kim') {
+        return spender;
+      }
+      return '';
+    }
+
+    function getSpenderStacks() {
+      return [
+        { key: 'seb', label: 'Seb', stack: 'spender-seb' },
+        { key: 'kim', label: 'Kim', stack: 'spender-kim' },
+      ];
+    }
+
+    function buildSplitByCardUsedDatasets(summary) {
+      const items = (Array.isArray(summary?.series) ? [...summary.series] : [])
+        .filter((item) => visibleChartCategories.has(item.category));
       if (!items.length) {
         return [];
       }
 
-      const ranked = items.sort((a, b) => {
-        const left = getRankingTotal(a.category, a.totalMinorUnits);
-        const right = getRankingTotal(b.category, b.totalMinorUnits);
-        if (left !== right) {
-          return right - left;
-        }
-        return (a.category || '').localeCompare(b.category || '', undefined, { sensitivity: 'base' });
+      const ranked = rankSeriesItems(items);
+      const limit = getTopCategoryLimit();
+      const topItems = limit === null || ranked.length <= limit ? ranked : ranked.slice(0, limit);
+      const remainder = limit === null || ranked.length <= limit ? [] : ranked.slice(limit);
+      const pointCount = currentSummary?.dates?.length || 0;
+      const spenderSeries = summary?.spenderSeries || {};
+      const spenderMaps = {};
+
+      getSpenderStacks().forEach((spender) => {
+        spenderMaps[spender.key] = new Map(
+          (spenderSeries[spender.key] || []).map((item) => [item.category, item]),
+        );
       });
+
+      const datasets = [];
+      getSpenderStacks().forEach((spender) => {
+        topItems.forEach((item) => {
+          const spenderItem = spenderMaps[spender.key].get(item.category);
+          const minorValues = spenderItem?.minorValues || Array.from({ length: pointCount }, () => 0);
+          const totalMinor = minorValues.reduce((sum, value) => sum + Number(value || 0), 0);
+          if (totalMinor <= 0) {
+            return;
+          }
+          datasets.push(withSplitAccent({
+            label: item.category,
+            categoryLabel: item.category,
+            data: minorValues.map((value) => Number(value || 0) / 100),
+            backgroundColor: hashLabel(item.category),
+            stack: spender.stack,
+            currency: spenderItem?.currency || item.currency || 'GBP',
+          }, spender.key));
+        });
+
+        if (!remainder.length) {
+          return;
+        }
+        const otherMinorValues = Array.from({ length: pointCount }, () => 0);
+        let otherCurrency = 'GBP';
+        remainder.forEach((item) => {
+          const spenderItem = spenderMaps[spender.key].get(item.category);
+          if (!spenderItem) {
+            return;
+          }
+          if (spenderItem.currency) {
+            otherCurrency = spenderItem.currency;
+          }
+          const minorValues = spenderItem.minorValues || [];
+          for (let index = 0; index < pointCount; index += 1) {
+            otherMinorValues[index] += Number(minorValues[index] || 0);
+          }
+        });
+        const otherTotalMinor = otherMinorValues.reduce((sum, value) => sum + value, 0);
+        if (otherTotalMinor <= 0) {
+          return;
+        }
+        datasets.push(withSplitAccent({
+          label: otherCategoryLabel,
+          categoryLabel: otherCategoryLabel,
+          data: otherMinorValues.map((value) => value / 100),
+          backgroundColor: '#94a3b8',
+          stack: spender.stack,
+          currency: otherCurrency,
+          isSyntheticOther: true,
+        }, spender.key));
+      });
+
+      return datasets;
+    }
+
+    function buildDefaultDatasets(series) {
+      const items = (Array.isArray(series) ? [...series] : [])
+        .filter((item) => visibleChartCategories.has(item.category));
+      if (!items.length) {
+        return [];
+      }
+
+      const ranked = rankSeriesItems(items);
 
       const limit = getTopCategoryLimit();
       if (limit === null || ranked.length <= limit) {
@@ -1002,23 +2164,6 @@
       }
     }
 
-    function sortTransactions(data) {
-      const { column, direction } = sortState;
-      const sorted = [...data];
-      sorted.sort((a, b) => {
-        let result = 0;
-        if (column === 'transactionTime') {
-          result = new Date(a[column]).getTime() - new Date(b[column]).getTime();
-        } else if (column === 'amountMinorUnits') {
-          result = (a[column] || 0) - (b[column] || 0);
-        } else {
-          result = (a[column] || '').localeCompare(b[column] || '', undefined, { sensitivity: 'base' });
-        }
-        return direction === 'asc' ? result : -result;
-      });
-      return sorted;
-    }
-
     function updateSortIndicators() {
       document.querySelectorAll('#transaction-table th[data-sort-key]').forEach((th) => {
         if (!currentFilter || currentTransactionsMessage) {
@@ -1039,8 +2184,13 @@
         return;
       }
       chartMode = 'default';
+      if (chartInstance.options?.plugins?.splitCardGlow) {
+        chartInstance.options.plugins.splitCardGlow.enabled = splitByCardUsed;
+      }
       chartInstance.data.labels = [...currentSummary.dates];
-      chartInstance.data.datasets = buildDefaultDatasets(currentSummary.series);
+      chartInstance.data.datasets = splitByCardUsed
+        ? buildSplitByCardUsedDatasets(currentSummary)
+        : buildDefaultDatasets(currentSummary.series);
       chartInstance.update();
     }
 
@@ -1069,10 +2219,21 @@
         }
         labelsSet.add(periodKey);
         const label = config.labelForTxn(txn);
-        if (!aggregates.has(label)) {
-          aggregates.set(label, { totals: new Map(), total: 0, currency: txn.currency || 'GBP' });
+        const spenderKey = splitByCardUsed ? normaliseTxnSpender(txn.spender) : 'all';
+        if (splitByCardUsed && !spenderKey) {
+          return;
         }
-        const entry = aggregates.get(label);
+        const aggregateKey = `${spenderKey || 'all'}::${label}`;
+        if (!aggregates.has(aggregateKey)) {
+          aggregates.set(aggregateKey, {
+            label,
+            spenderKey,
+            totals: new Map(),
+            total: 0,
+            currency: txn.currency || 'GBP',
+          });
+        }
+        const entry = aggregates.get(aggregateKey);
         entry.totals.set(periodKey, (entry.totals.get(periodKey) || 0) + amount);
         entry.total += amount;
       });
@@ -1085,15 +2246,22 @@
       const labels = Array.from(labelsSet).sort();
       const datasets = Array.from(aggregates.entries())
         .sort((a, b) => b[1].total - a[1].total)
-        .map(([name, data]) => ({
-          label: name,
-          data: labels.map((labelKey) => (data.totals.get(labelKey) || 0) / 100),
-          backgroundColor: hashLabel(name),
-          stack: config.stack,
-          currency: data.currency,
-        }));
+        .map(([, data]) => {
+          const dataset = {
+            label: data.label,
+            categoryLabel: data.label,
+            data: labels.map((labelKey) => (data.totals.get(labelKey) || 0) / 100),
+            backgroundColor: hashLabel(data.label),
+            stack: splitByCardUsed && data.spenderKey ? `split-${data.spenderKey}-${config.stack}` : config.stack,
+            currency: data.currency,
+          };
+          return splitByCardUsed ? withSplitAccent(dataset, data.spenderKey) : dataset;
+        });
 
       chartMode = config.mode;
+      if (chartInstance.options?.plugins?.splitCardGlow) {
+        chartInstance.options.plugins.splitCardGlow.enabled = splitByCardUsed;
+      }
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
       chartInstance.update();
@@ -1110,13 +2278,21 @@
       }
     }
 
+    function getTransactionColumnCount() {
+      return splitByCardUsed ? 8 : 7;
+    }
+
     function renderTransactionsTable() {
       const card = document.getElementById('transactions-card');
       const title = document.getElementById('transactions-title');
       const tbody = document.querySelector('#transaction-table tbody');
+      if (transactionSpenderColumn) {
+        transactionSpenderColumn.hidden = !splitByCardUsed;
+      }
 
       if (!currentFilter) {
         card.hidden = true;
+        closeActiveNoteEditor();
         selectedTransactionIds.clear();
         updateSelectionControls();
         updatePaginationControls();
@@ -1126,13 +2302,14 @@
 
       card.hidden = false;
       title.textContent = currentFilter.label ? `Transactions: ${currentFilter.label}` : 'Transactions';
+      closeActiveNoteEditor();
       tbody.innerHTML = '';
 
       if (currentTransactionsMessage) {
         selectedTransactionIds.clear();
         const row = document.createElement('tr');
         const cell = document.createElement('td');
-        cell.colSpan = 7;
+        cell.colSpan = getTransactionColumnCount();
         cell.textContent = currentTransactionsMessage;
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -1146,7 +2323,7 @@
         selectedTransactionIds.clear();
         const row = document.createElement('tr');
         const cell = document.createElement('td');
-        cell.colSpan = 7;
+        cell.colSpan = getTransactionColumnCount();
         cell.textContent = 'No transactions recorded for this selection in the chosen window.';
         row.appendChild(cell);
         tbody.appendChild(row);
@@ -1156,15 +2333,14 @@
         return;
       }
 
-      const sorted = sortTransactions(currentTransactions);
-      const visibleIdSet = new Set(sorted.map((txn) => txn.feedItemUid));
+      const visibleIdSet = new Set(currentTransactions.map((txn) => txn.feedItemUid));
       Array.from(selectedTransactionIds).forEach((id) => {
         if (!visibleIdSet.has(id)) {
           selectedTransactionIds.delete(id);
         }
       });
 
-      sorted.forEach((txn) => {
+      currentTransactions.forEach((txn) => {
         const row = document.createElement('tr');
 
         const selectCell = document.createElement('td');
@@ -1191,9 +2367,16 @@
 
         const counterpartyCell = document.createElement('td');
         if (txn.counterparty) {
+          const counterpartyContent = document.createElement('div');
+          counterpartyContent.classList.add('counterparty-cell');
           const textSpan = document.createElement('span');
           textSpan.textContent = txn.counterparty;
-          counterpartyCell.appendChild(textSpan);
+          if (txn.counterpartyNote) {
+            textSpan.title = txn.counterpartyNote;
+          }
+          counterpartyContent.appendChild(textSpan);
+          const actionRow = document.createElement('div');
+          actionRow.classList.add('counterparty-actions');
           const params = new URLSearchParams({
             pattern: txn.counterparty,
             rule_type: 'counterparty_regex',
@@ -1214,7 +2397,20 @@
               rule_type: 'counterparty_regex',
             });
           });
-          counterpartyCell.appendChild(ruleButton);
+          actionRow.appendChild(ruleButton);
+          appendNoteControls(actionRow, {
+            note: txn.counterpartyNote || '',
+            placeholder: `Add a note for ${txn.counterparty}`,
+            onSave: async (value) => {
+              const payload = await postNote(counterpartyNoteEndpoint, {
+                counterparty: txn.counterparty,
+                note: value,
+              });
+              updateCounterpartyNoteInCurrentTransactions(txn.counterparty, payload.note || '');
+            },
+          });
+          counterpartyContent.appendChild(actionRow);
+          counterpartyCell.appendChild(counterpartyContent);
         } else {
           counterpartyCell.textContent = '—';
         }
@@ -1228,10 +2424,34 @@
         sourceCell.textContent = txn.source || '—';
         row.appendChild(sourceCell);
 
+        if (splitByCardUsed) {
+          const spenderCell = document.createElement('td');
+          spenderCell.textContent = txn.spender || '—';
+          row.appendChild(spenderCell);
+        }
+
         const amountCell = document.createElement('td');
         amountCell.classList.add('numeric');
-        const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: txn.currency || 'GBP' });
-        amountCell.textContent = formatter.format((txn.amountMinorUnits || 0) / 100);
+        const amountContent = document.createElement('div');
+        amountContent.classList.add('amount-cell-content');
+        const amountValue = document.createElement('span');
+        amountValue.textContent = formatCurrencyFromMinor(txn.amountMinorUnits || 0, txn.currency || 'GBP');
+        if (txn.transactionNote) {
+          amountValue.title = txn.transactionNote;
+        }
+        amountContent.appendChild(amountValue);
+        appendNoteControls(amountContent, {
+          note: txn.transactionNote || '',
+          placeholder: `Add a note for ${formatCurrencyFromMinor(txn.amountMinorUnits || 0, txn.currency || 'GBP')}`,
+          onSave: async (value) => {
+            const payload = await postNote(transactionNoteEndpoint, {
+              feedItemUid: txn.feedItemUid,
+              note: value,
+            });
+            updateTransactionNoteInCurrentTransactions(txn.feedItemUid, payload.note || '');
+          },
+        });
+        amountCell.appendChild(amountContent);
         row.appendChild(amountCell);
 
         tbody.appendChild(row);
@@ -1242,13 +2462,16 @@
       updateSortIndicators();
     }
 
-    function showTransactionsLoading(filter, page = 1) {
+    function showTransactionsLoading(filter, page = 1, options = {}) {
       currentFilter = { ...filter, label: filter.label || filter.value };
       currentTransactions = [];
       currentTransactionsMessage = 'Loading…';
+      showSpendingSummaryLoading(currentFilter);
       resetTransactionsPaging(page);
-      sortState.column = 'transactionTime';
-      sortState.direction = 'desc';
+      if (options.resetSort !== false) {
+        sortState.column = 'transactionTime';
+        sortState.direction = 'desc';
+      }
       if (filter.type === 'category') {
         selectedCategory = filter.value;
       } else {
@@ -1275,8 +2498,9 @@
         && currentFilter.type === prepared.type
         && currentFilter.value === prepared.value;
       const requestedPage = Number(options.page || (sameFilter ? transactionsPaging.page : 1));
+      const resetSort = options.resetSort !== undefined ? Boolean(options.resetSort) : !sameFilter;
       if (!options.preserveMessage) {
-        showTransactionsLoading(prepared, requestedPage);
+        showTransactionsLoading(prepared, requestedPage, { resetSort });
       } else {
         transactionsPaging.page = requestedPage;
       }
@@ -1285,6 +2509,12 @@
       params.set('start', currentRange.start.toISOString());
       params.set('end', currentRange.end.toISOString());
       params.set('page', String(requestedPage));
+      params.set('sort', sortState.column);
+      params.set('direction', sortState.direction);
+      if (currentSpender !== 'both') {
+        params.set('spender', currentSpender);
+      }
+      appendSelectedCategories(params);
       if (prepared.type === 'category') {
         params.set('category', prepared.value);
       } else if (prepared.type === 'counterparty') {
@@ -1302,6 +2532,7 @@
         currentFilter = prepared;
         currentTransactions = payload.transactions || [];
         currentTransactionsMessage = null;
+        renderSpendingSummary(prepared, payload);
         setTransactionsPagingFromPayload(payload, requestedPage);
         renderTransactionsTable();
         if (STACK_CONFIG[prepared.type]) {
@@ -1313,6 +2544,11 @@
         currentFilter = prepared;
         currentTransactions = [];
         currentTransactionsMessage = 'Unable to load transactions. Please try again.';
+        renderSpendingSummary(prepared, {
+          start: currentRange.start ? currentRange.start.toISOString() : '',
+          end: currentRange.end ? currentRange.end.toISOString() : '',
+          summary: { periodDays: currentRange.days, currency: 'GBP' },
+        });
         resetTransactionsPaging(requestedPage);
         selectedTransactionIds.clear();
         renderTransactionsTable();
@@ -1326,7 +2562,7 @@
 
     function resetSelection() {
       selectedCategory = null;
-      window.history.replaceState({}, '', normalizedBasePath);
+      replaceCurrentUrl(buildAllTransactionsFilter());
       void loadAllTransactions({ page: 1 });
     }
 
@@ -1334,14 +2570,14 @@
       if (!currentFilter || !transactionsPaging.hasPreviousPage) {
         return;
       }
-      void loadTransactions(currentFilter, { page: transactionsPaging.page - 1 });
+      void loadTransactions(currentFilter, { page: transactionsPaging.page - 1, resetSort: false });
     }
 
     function handleNextPage() {
       if (!currentFilter || !transactionsPaging.hasNextPage) {
         return;
       }
-      void loadTransactions(currentFilter, { page: transactionsPaging.page + 1 });
+      void loadTransactions(currentFilter, { page: transactionsPaging.page + 1, resetSort: false });
     }
 
     function handleSortClick(event) {
@@ -1357,7 +2593,7 @@
         sortState.direction = key === 'transactionTime' ? 'desc' : 'asc';
       }
 
-      renderTransactionsTable();
+      void loadTransactions(currentFilter, { page: 1, resetSort: false });
     }
 
     function handleChartClick(event) {
@@ -1378,13 +2614,17 @@
       if (!dataset) {
         return;
       }
-      const selectedLabel = dataset.label;
+      const selectedLabel = dataset.categoryLabel || dataset.label;
       if (dataset.isSyntheticOther) {
         return;
       }
 
       if (chartMode === 'counterparty') {
-        window.location.href = `${counterpartyPathBase}${encodeURIComponent(selectedLabel)}/`;
+        window.location.href = buildPageUrl({
+          type: 'counterparty',
+          value: selectedLabel,
+          label: selectedLabel,
+        });
         return;
       }
 
@@ -1394,7 +2634,7 @@
       }
 
       const filter = { type: 'category', value: selectedLabel, label: selectedLabel };
-      window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(selectedLabel)}/`);
+      replaceCurrentUrl(filter);
       void loadTransactions(filter);
     }
 
@@ -1409,8 +2649,14 @@
       if (!overviewSummary) {
         return;
       }
-      const ctx = document.getElementById('spending-overview-chart').getContext('2d');
       const data = buildOverviewDataset(overviewSummary);
+      if (overviewChart) {
+        overviewChart.data.labels = [...overviewSummary.dates];
+        overviewChart.data.datasets[0].data = data;
+        overviewChart.update();
+        return;
+      }
+      const ctx = document.getElementById('spending-overview-chart').getContext('2d');
       overviewChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1600,6 +2846,7 @@
         currentSummary = summary;
         currentRange.bucket = summary.bucket || 'month';
         currentRange.days = summary.days;
+        syncCategorySidebar(summary);
         reapplyChartMode();
         if (currentFilter && options.retainTransactions !== false) {
           await loadTransactions(currentFilter, { preserveMessage: true });
@@ -1646,7 +2893,39 @@
       });
     }
 
+    async function reloadForSpenderChange() {
+      const selectedStart = currentRange.start ? new Date(currentRange.start.getTime()) : null;
+      const selectedEnd = currentRange.end ? new Date(currentRange.end.getTime()) : null;
+      try {
+        overviewSummary = await fetchSpendingData({ days: overviewDays });
+        overviewDates = overviewSummary.dates.map(parseIsoDate);
+        renderOverviewChart();
+      } catch (error) {
+        console.error('Unable to load overview data', error);
+        return;
+      }
+
+      try {
+        const annualSummary = await fetchSpendingData({
+          days: topCategoryRankingDays,
+          reference: overviewSummary.reference,
+        });
+        updateAnnualCategoryTotals(annualSummary);
+      } catch (error) {
+        console.error('Unable to load yearly ranking data', error);
+        updateAnnualCategoryTotals(overviewSummary);
+      }
+
+      const range = findRangeIndicesForDates(selectedStart, selectedEnd);
+      setBrushIndices(range.start, range.end);
+      await applyRangeSelectionFromIndices();
+    }
+
     async function renderChart() {
+      currentSpender = normaliseSpender(initialSpender);
+      updateSidebarSpenderControls();
+      splitByCardUsed = Boolean(splitByCardUsedToggle?.checked);
+      updateSplitLegend();
       try {
         overviewSummary = await fetchSpendingData({ days: overviewDays });
         overviewDates = overviewSummary.dates.map(parseIsoDate);
@@ -1668,6 +2947,7 @@
       const ctx = document.getElementById('spending-chart').getContext('2d');
       chartInstance = new Chart(ctx, {
         type: 'bar',
+        plugins: [splitCardGlowPlugin],
         data: {
           labels: [],
           datasets: [],
@@ -1682,9 +2962,13 @@
                 label: function(context) {
                   const value = context.raw || 0;
                   const formatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: context.dataset.currency });
-                  return `${context.dataset.label}: ${formatter.format(value)}`;
+                  const prefix = context.dataset.spenderLabel ? `${context.dataset.spenderLabel} • ` : '';
+                  return `${prefix}${context.dataset.label}: ${formatter.format(value)}`;
                 },
               },
+            },
+            splitCardGlow: {
+              enabled: splitByCardUsed,
             },
           },
           scales: {
@@ -1719,14 +3003,14 @@
 
       if (initialCategory && currentSummary?.series?.some((item) => item.category === initialCategory)) {
         const filter = { type: 'category', value: initialCategory, label: initialCategory };
-        window.history.replaceState({}, '', `${categoryPathBase}${encodeURIComponent(initialCategory)}/`);
+        replaceCurrentUrl(filter);
         await loadTransactions(filter);
         return;
       }
 
       if (initialCounterparty) {
         const filter = { type: 'counterparty', value: initialCounterparty, label: initialCounterparty };
-        window.history.replaceState({}, '', `${counterpartyPathBase}${encodeURIComponent(initialCounterparty)}/`);
+        replaceCurrentUrl(filter);
         await loadTransactions(filter);
         return;
       }
@@ -1735,13 +3019,13 @@
         const safeSearch = initialSearch.trim();
         if (safeSearch) {
           const filter = { type: 'search', value: safeSearch, label: `Search for "${safeSearch}"` };
-          window.history.replaceState({}, '', `${normalizedBasePath}?search=${encodeURIComponent(safeSearch)}`);
+          replaceCurrentUrl(filter);
           await loadTransactions(filter);
           return;
         }
       }
 
-      window.history.replaceState({}, '', normalizedBasePath);
+      replaceCurrentUrl(buildAllTransactionsFilter());
       await loadAllTransactions({ page: 1 });
     }
 
@@ -1761,10 +3045,60 @@
       topCategorySlider.addEventListener('input', handleTopCategoryLimitChange);
       topCategorySlider.addEventListener('change', handleTopCategoryLimitChange);
     }
+    if (splitByCardUsedToggle) {
+      splitByCardUsedToggle.addEventListener('change', () => {
+        splitByCardUsed = splitByCardUsedToggle.checked;
+        updateSplitLegend();
+        renderTransactionsTable();
+        reapplyChartMode();
+      });
+    }
+    if (sidebarSpenderFilter) {
+      sidebarSpenderFilter.querySelectorAll('button[data-spender]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const nextSpender = normaliseSpender(button.dataset.spender);
+          if (nextSpender === currentSpender) {
+            return;
+          }
+          currentSpender = nextSpender;
+          updateSidebarSpenderControls();
+          await reloadForSpenderChange();
+          replaceCurrentUrl(currentFilter);
+        });
+      });
+    }
 
     updateSelectionControls();
     updatePaginationControls();
     updateTopCategoryValueLabel();
+    renderCategorySidebar();
+
+    if (categorySelectAllButton) {
+      categorySelectAllButton.addEventListener('click', () => {
+        categorySelectionMode = 'all';
+        visibleChartCategories = new Set(availableChartCategories);
+        renderCategorySidebar();
+        if (chartMode === 'default') {
+          applyDefaultDatasets();
+        }
+        if (currentFilter) {
+          void loadTransactions(currentFilter, { page: 1, resetSort: false });
+        }
+      });
+    }
+    if (categoryClearAllButton) {
+      categoryClearAllButton.addEventListener('click', () => {
+        categorySelectionMode = 'custom';
+        visibleChartCategories.clear();
+        renderCategorySidebar();
+        if (chartMode === 'default') {
+          applyDefaultDatasets();
+        }
+        if (currentFilter) {
+          void loadTransactions(currentFilter, { page: 1, resetSort: false });
+        }
+      });
+    }
 
     document.addEventListener('DOMContentLoaded', renderChart);
   </script>
