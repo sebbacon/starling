@@ -68,6 +68,34 @@ def test_due_release_count_anchors_to_calendar_month_start():
     ) == 1
 
 
+def test_due_release_count_does_not_fire_immediately_for_late_month_salary():
+    # Salary arrives April 28; all of April's release days (8, 15, 23) have
+    # already passed, so no releases should be due on April 29.  Releases
+    # must roll into May instead.
+    salary_time = datetime(2026, 4, 28, 23, 0, tzinfo=timezone.utc)
+
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 4, 29, 9, 0, tzinfo=timezone.utc),
+    ) == 0
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 5, 7, 9, 0, tzinfo=timezone.utc),
+    ) == 0
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 5, 8, 9, 0, tzinfo=timezone.utc),
+    ) == 1
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 5, 15, 9, 0, tzinfo=timezone.utc),
+    ) == 2
+    assert salary_automation.due_release_count(
+        salary_time,
+        now=datetime(2026, 5, 23, 9, 0, tzinfo=timezone.utc),
+    ) == 3
+
+
 # ---------------------------------------------------------------------------
 # _as_utc
 # ---------------------------------------------------------------------------

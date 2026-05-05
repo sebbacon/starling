@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -86,16 +86,28 @@ def due_release_count(
     if current <= salary:
         return 0
 
+    salary_local_date = salary.astimezone(LONDON_TZ).date()
     current_local_date = current.astimezone(LONDON_TZ).date()
-    cycle_start = current_local_date.replace(day=1)
-    day_offset = (current_local_date - cycle_start).days
-    cycle_day = day_offset + 1
 
-    due = 0
-    for day_threshold in RELEASE_DAYS:
-        if cycle_day >= day_threshold:
-            due += 1
-    return due
+    # Collect the three release dates that fall strictly after the salary date.
+    # When salary arrives late in the month (e.g. day 28), all RELEASE_DAYS in
+    # that month have already passed, so we roll into the following month.
+    release_dates: List[date] = []
+    year, month = salary_local_date.year, salary_local_date.month
+    while len(release_dates) < len(RELEASE_DAYS):
+        for day in RELEASE_DAYS:
+            release_date = date(year, month, day)
+            if release_date > salary_local_date:
+                release_dates.append(release_date)
+            if len(release_dates) == len(RELEASE_DAYS):
+                break
+        if len(release_dates) < len(RELEASE_DAYS):
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+    return sum(1 for d in release_dates if d <= current_local_date)
 
 
 def run_salary_automation(
@@ -111,7 +123,6 @@ def run_salary_automation(
         raise SalaryAutomationError("STARLING_PAT must not be blank")
 
     now_utc = _as_utc(now or datetime.now(timezone.utc))
-    cycle_start = _month_cycle_start(now_utc)
     headers = {
         "Authorization": f"Bearer {cleaned_token}",
         "Accept": "application/json",
@@ -153,7 +164,7 @@ def run_salary_automation(
                 client,
                 account_uid=account["uid"],
                 spaces=spaces,
-                cycle_start=cycle_start,
+                cycle_start=_next_month_start(salary_time),
             ),
         )
         due_tranches = due_release_count(salary_time, now=now_utc)
@@ -619,10 +630,14 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _month_cycle_start(value: datetime) -> datetime:
+def _next_month_start(value: datetime) -> datetime:
     local = _as_utc(value).astimezone(LONDON_TZ)
-    cycle_start_local = datetime(local.year, local.month, 1, tzinfo=LONDON_TZ)
-    return cycle_start_local.astimezone(timezone.utc)
+    month = local.month + 1
+    year = local.year
+    if month > 12:
+        month = 1
+        year += 1
+    return datetime(year, month, 1, tzinfo=LONDON_TZ).astimezone(timezone.utc)
 
 
 def _isoformat_utc(value: datetime) -> str:
