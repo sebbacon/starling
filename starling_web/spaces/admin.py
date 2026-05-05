@@ -1,7 +1,31 @@
 from django.contrib import admin
 from django.db.models import Q
 
-from .models import Category, ClassificationRule, FeedItem, SyncState
+from .models import (
+    ApplicationUser,
+    Category,
+    ClassificationRule,
+    CounterpartyNote,
+    FeedItem,
+    HolidayMerchantOverride,
+    HolidaySuggestionDecision,
+    SavingsSignalDismissal,
+    SyncState,
+    TransactionNote,
+    UserDefinedCategory,
+)
+
+
+@admin.register(UserDefinedCategory)
+class UserDefinedCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(ApplicationUser)
+class ApplicationUserAdmin(admin.ModelAdmin):
+    list_display = ("user_uid", "name")
+    search_fields = ("user_uid", "name")
 
 
 @admin.register(Category)

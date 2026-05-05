@@ -8,7 +8,7 @@ import httpx
 from django.db import transaction
 from django.db.models import Count, F, Sum
 
-from starling_web.spaces.models import Category, FeedItem, SyncState
+from starling_web.spaces.models import ApplicationUser, Category, FeedItem, SyncState
 
 from .classification import classify_for_storage
 from .reporting import (
@@ -39,6 +39,7 @@ class FeedRecord:
     source: Optional[str]
     counterparty: Optional[str]
     spending_category: Optional[str]
+    spender: Optional[str]
     raw: Dict[str, Any]
 
 
@@ -330,6 +331,7 @@ def _sync_feed_category(
     changes_since: Optional[str],
     max_pages: Optional[int],
 ) -> None:
+    user_map = {u.user_uid: u.name for u in ApplicationUser.objects.all()}
     latest = _current_sync_cursor(report.account_uid, category_uid)
     cursor = changes_since or latest or DEFAULT_CHANGES_SINCE
     url = f"/api/v2/feed/account/{report.account_uid}/category/{category_uid}"
@@ -351,12 +353,15 @@ def _sync_feed_category(
         feed_items = data.get("feedItems") or []
         with transaction.atomic():
             for raw_item in feed_items:
+                if raw_item.get("status") == "DECLINED":
+                    continue
                 record = _parse_feed_record(
                     raw_item,
                     account_uid=report.account_uid,
                     category_uid=category_uid,
                     space_uid=space_uid,
                     currency_hint=report.currency,
+                    user_map=user_map,
                 )
                 classification = classify_for_storage(record, space_name)
                 _insert_feed_record(record, classification)
@@ -393,6 +398,7 @@ def _parse_feed_record(
     category_uid: str,
     space_uid: Optional[str],
     currency_hint: Optional[str],
+    user_map: Optional[Dict[str, str]] = None,
 ) -> FeedRecord:
     feed_item_uid = raw.get("feedItemUid")
     if not feed_item_uid:
@@ -406,6 +412,8 @@ def _parse_feed_record(
     counterparty = raw.get("counterPartyName") or raw.get("counterPartyType")
     source = raw.get("source")
     spending_category = raw.get("spendingCategory")
+    transacting_uid = raw.get("transactingApplicationUserUid")
+    spender = (user_map or {}).get(transacting_uid) if transacting_uid else None
 
     return FeedRecord(
         feed_item_uid=str(feed_item_uid),
@@ -419,6 +427,7 @@ def _parse_feed_record(
         source=str(source) if source else None,
         counterparty=str(counterparty) if counterparty else None,
         spending_category=str(spending_category) if spending_category else None,
+        spender=spender,
         raw=raw,
     )
 
@@ -483,6 +492,7 @@ def _insert_feed_record(record: FeedRecord, classification) -> None:
             "spending_category": record.spending_category,
             "classified_category": classification.category,
             "classification_reason": classification.reason,
+            "spender": record.spender,
             "raw_json": record.raw,
         },
     )

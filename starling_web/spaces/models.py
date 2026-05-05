@@ -1,6 +1,25 @@
 from django.db import models
 
 
+class UserDefinedCategory(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name_plural = "user defined categories"
+
+    def __str__(self):
+        return self.name
+
+
+class ApplicationUser(models.Model):
+    user_uid = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.name
+
+
 class Category(models.Model):
     account_uid = models.CharField(max_length=64)
     category_type = models.CharField(max_length=16)
@@ -51,6 +70,7 @@ class FeedItem(models.Model):
     spending_category = models.CharField(max_length=64, blank=True, null=True)
     classified_category = models.CharField(max_length=255, blank=True, null=True)
     classification_reason = models.CharField(max_length=64, blank=True, null=True)
+    spender = models.CharField(max_length=255, blank=True, null=True)
     raw_json = models.JSONField(default=dict)
 
     class Meta:

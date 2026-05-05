@@ -5,7 +5,7 @@ import pytest
 from django.core.management import CommandError, call_command
 
 from starling_spaces import reporting
-from starling_web.spaces.models import Category, ClassificationRule, FeedItem
+from starling_web.spaces.models import ApplicationUser, Category, ClassificationRule, FeedItem
 
 
 def test_ingest_feeds_requires_token(monkeypatch):
@@ -310,6 +310,36 @@ def test_run_salary_automation_outputs_summary(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "ok"
     assert payload["executed"] == 4
+
+
+@pytest.mark.django_db
+def test_backfill_spenders_populates_spender_field():
+    ApplicationUser.objects.create(user_uid="uid-seb", name="Seb")
+    FeedItem.objects.create(
+        feed_item_uid="tx-seb",
+        account_uid="acc-1",
+        category_uid="cat-1",
+        direction="OUT",
+        amount_minor_units=-500,
+        currency="GBP",
+        transaction_time=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        raw_json={"transactingApplicationUserUid": "uid-seb"},
+    )
+    FeedItem.objects.create(
+        feed_item_uid="tx-no-uid",
+        account_uid="acc-1",
+        category_uid="cat-1",
+        direction="OUT",
+        amount_minor_units=-300,
+        currency="GBP",
+        transaction_time=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+        raw_json={},
+    )
+
+    call_command("backfill_spenders")
+
+    assert FeedItem.objects.get(feed_item_uid="tx-seb").spender == "Seb"
+    assert FeedItem.objects.get(feed_item_uid="tx-no-uid").spender is None
 
 
 def test_report_spaces_wraps_errors(monkeypatch):

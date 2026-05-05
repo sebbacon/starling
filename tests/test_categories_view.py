@@ -5,7 +5,8 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from starling_web.spaces.models import FeedItem
+from starling_web.spaces.models import FeedItem, UserDefinedCategory
+from starling_web.spaces.views import _get_spending_category_options
 
 
 pytestmark = pytest.mark.django_db
@@ -169,3 +170,35 @@ def test_categories_data_rejects_invalid_period():
         {"period": "bogus"},
     )
     assert response.status_code == 400
+
+
+def test_add_category_creates_user_defined_category():
+    client = Client()
+    response = client.post(reverse("spaces:categories-add"), {"name": "Holiday"})
+    assert response.status_code == 200
+    assert UserDefinedCategory.objects.filter(name="Holiday").exists()
+    assert b"Holiday" in response.content
+
+
+def test_add_category_duplicate_name_returns_error():
+    UserDefinedCategory.objects.create(name="Food")
+    client = Client()
+    response = client.post(reverse("spaces:categories-add"), {"name": "Food"})
+    assert response.status_code == 200
+    assert b"already exists" in response.content
+    assert UserDefinedCategory.objects.filter(name="Food").count() == 1
+
+
+def test_add_category_blank_name_returns_error():
+    before_count = UserDefinedCategory.objects.count()
+    client = Client()
+    response = client.post(reverse("spaces:categories-add"), {"name": ""})
+    assert response.status_code == 200
+    assert b"required" in response.content.lower()
+    assert UserDefinedCategory.objects.count() == before_count
+
+
+def test_user_defined_category_appears_in_spending_category_options():
+    UserDefinedCategory.objects.create(name="My Custom Category")
+    options = _get_spending_category_options()
+    assert "My Custom Category" in options

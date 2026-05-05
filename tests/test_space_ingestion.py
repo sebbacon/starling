@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from starling_spaces.ingestion import calculate_average_spend, sync_space_feeds
-from starling_web.spaces.models import Category, FeedItem, SyncState
+from starling_web.spaces.models import ApplicationUser, Category, FeedItem, SyncState
 
 pytestmark = pytest.mark.django_db
 
@@ -211,3 +211,131 @@ def test_sync_space_feeds_persists_feed_items(respx_mock):
     assert spending["SHOPPING"]["outflowCount"] == 1
     assert spending["ENTERTAINMENT"]["totalOutflowMinorUnits"] == 1000
     assert spending["DINING"]["totalOutflowMinorUnits"] == 2500
+
+
+@respx.mock
+def test_sync_space_feeds_skips_declined_transactions(respx_mock):
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
+        json={
+            "accounts": [
+                {
+                    "accountUid": "acc-456",
+                    "name": "Personal",
+                    "currency": "GBP",
+                    "defaultCategory": "cat-456",
+                }
+            ]
+        }
+    )
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/accounts/acc-456/balance"
+    ).respond(json={"effectiveBalance": {"currency": "GBP", "minorUnits": 100000}})
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/account/acc-456/spaces"
+    ).respond(json={"spaceList": []})
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-456/category/cat-456"
+    ).respond(
+        json={
+            "feedItems": [
+                {
+                    "feedItemUid": "settled-1",
+                    "categoryUid": "cat-456",
+                    "transactionTime": "2026-03-11T12:00:00Z",
+                    "amount": {"currency": "GBP", "minorUnits": 5000},
+                    "direction": "OUT",
+                    "source": "MASTER_CARD",
+                    "counterPartyName": "Some Shop",
+                    "spendingCategory": "SHOPPING",
+                    "status": "SETTLED",
+                },
+                {
+                    "feedItemUid": "declined-1",
+                    "categoryUid": "cat-456",
+                    "transactionTime": "2026-03-11T12:36:40Z",
+                    "amount": {"currency": "GBP", "minorUnits": 17122},
+                    "direction": "OUT",
+                    "source": "MASTER_CARD",
+                    "counterPartyName": "Trip.com",
+                    "spendingCategory": "TRANSPORT",
+                    "status": "DECLINED",
+                },
+            ],
+            "pageable": {"next": None},
+        }
+    )
+
+    sync_space_feeds("TOKEN")
+
+    feed_ids = set(FeedItem.objects.values_list("feed_item_uid", flat=True))
+    assert "settled-1" in feed_ids
+    assert "declined-1" not in feed_ids
+
+
+@respx.mock
+def test_sync_space_feeds_populates_spender_from_application_user(respx_mock):
+    ApplicationUser.objects.create(user_uid="uid-kim", name="Kim")
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
+        json={"accounts": [{"accountUid": "acc-789", "name": "Personal", "currency": "GBP", "defaultCategory": "cat-789"}]}
+    )
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts/acc-789/balance").respond(
+        json={"effectiveBalance": {"currency": "GBP", "minorUnits": 100000}}
+    )
+    respx_mock.get("https://api.starlingbank.com/api/v2/account/acc-789/spaces").respond(json={"spaceList": []})
+    respx_mock.get("https://api.starlingbank.com/api/v2/feed/account/acc-789/category/cat-789").respond(
+        json={
+            "feedItems": [
+                {
+                    "feedItemUid": "item-kim",
+                    "categoryUid": "cat-789",
+                    "transactionTime": "2026-01-08T14:57:00Z",
+                    "amount": {"currency": "GBP", "minorUnits": 799},
+                    "direction": "OUT",
+                    "source": "MASTER_CARD",
+                    "counterPartyName": "Audible",
+                    "spendingCategory": "ENTERTAINMENT",
+                    "transactingApplicationUserUid": "uid-kim",
+                },
+            ],
+            "pageable": {"next": None},
+        }
+    )
+
+    sync_space_feeds("TOKEN")
+
+    item = FeedItem.objects.get(feed_item_uid="item-kim")
+    assert item.spender == "Kim"
+
+
+@respx.mock
+def test_sync_space_feeds_spender_null_when_no_user_mapping(respx_mock):
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
+        json={"accounts": [{"accountUid": "acc-000", "name": "Personal", "currency": "GBP", "defaultCategory": "cat-000"}]}
+    )
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts/acc-000/balance").respond(
+        json={"effectiveBalance": {"currency": "GBP", "minorUnits": 100000}}
+    )
+    respx_mock.get("https://api.starlingbank.com/api/v2/account/acc-000/spaces").respond(json={"spaceList": []})
+    respx_mock.get("https://api.starlingbank.com/api/v2/feed/account/acc-000/category/cat-000").respond(
+        json={
+            "feedItems": [
+                {
+                    "feedItemUid": "item-unknown",
+                    "categoryUid": "cat-000",
+                    "transactionTime": "2026-01-09T10:00:00Z",
+                    "amount": {"currency": "GBP", "minorUnits": 1000},
+                    "direction": "OUT",
+                    "source": "MASTER_CARD",
+                    "counterPartyName": "Shop",
+                    "spendingCategory": "SHOPPING",
+                    "transactingApplicationUserUid": "uid-unknown",
+                },
+            ],
+            "pageable": {"next": None},
+        }
+    )
+
+    sync_space_feeds("TOKEN")
+
+    item = FeedItem.objects.get(feed_item_uid="item-unknown")
+    assert item.spender is None

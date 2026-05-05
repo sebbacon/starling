@@ -62,6 +62,29 @@
     </div>
   </section>
 
+  <section class="card add-category-card">
+    <h2>Add category</h2>
+    <p>Create a named category so it appears in classification rules and recategorisation dropdowns.</p>
+    <form
+      hx-post="{% url 'spaces:categories-add' %}"
+      hx-target="#add-category-result"
+      hx-swap="innerHTML"
+      hx-on::after-request="if(event.detail.successful && event.detail.xhr.status===200 && !this.querySelector('.add-category__error')) this.querySelector('input[name=name]').value=''"
+      class="add-category-form"
+    >
+      {% csrf_token %}
+      <input type="text" name="name" placeholder="e.g. Holidays" class="add-category-form__input" required />
+      <button type="submit" class="add-category-form__button">Add</button>
+    </form>
+    <div id="add-category-result" class="add-category-result">
+      {% if user_categories %}
+        <ul class="add-category__list">
+          {% for cat in user_categories %}<li>{{ cat.name }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </section>
+
   <style>
     .categories-card {
       display: grid;
@@ -179,6 +202,75 @@
       text-align: center;
       color: rgba(148, 163, 184, 0.7);
       font-style: italic;
+    }
+  </style>
+
+    .add-category-card {
+      display: grid;
+      gap: 1rem;
+    }
+    .add-category-card h2 {
+      margin: 0;
+    }
+    .add-category-card p {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
+    .add-category-form {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .add-category-form__input {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: #0f172a;
+    }
+    .add-category-form__button {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.4rem 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .add-category-form__button:hover {
+      background: #115e59;
+    }
+    .add-category__list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .add-category__list li {
+      background: rgba(52, 211, 153, 0.12);
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.85rem;
+      color: #0f766e;
+    }
+    .add-category__success {
+      margin: 0.5rem 0 0;
+      color: #0f766e;
+      font-size: 0.9rem;
+    }
+    .add-category__error {
+      margin: 0.5rem 0 0;
+      color: #dc2626;
+      font-size: 0.9rem;
+    }
+    .add-category-result {
+      min-height: 1.5rem;
     }
   </style>
 
