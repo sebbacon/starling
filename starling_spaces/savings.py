@@ -6,7 +6,7 @@ from statistics import median
 
 from django.db.models.functions import Upper
 
-from starling_web.spaces.models import FeedItem
+from starling_web.spaces.models import FeedItem, SavingsSignalDismissal
 
 from .analytics import EXCLUDED_TRANSFER_SOURCES
 
@@ -70,6 +70,7 @@ GROUP_TYPES = {
     "trends": "trend",
     "anomalies": "anomaly",
 }
+DISMISSIBLE_SIGNAL_TYPES = {"subscription"}
 
 
 def calculate_savings_signals(*, days: int, reference_time=None, start_time=None, confidence_mode="balanced", group="all"):
@@ -116,6 +117,8 @@ def calculate_savings_signals(*, days: int, reference_time=None, start_time=None
     if group != "all":
         selected_type = GROUP_TYPES[group]
         signals = [signal for signal in signals if signal["type"] == selected_type]
+
+    signals = _filter_dismissed_signals(signals)
 
     signals.sort(
         key=lambda item: (
@@ -272,6 +275,8 @@ def _build_subscription_signals(*, transactions, reference, profile):
             {
                 "id": f"subscription:{_slug(counterparty)}:{cadence}",
                 "type": "subscription",
+                "dismissalKey": _signal_dismissal_key(signal_type="subscription", value=counterparty),
+                "dismissible": True,
                 "title": title,
                 "description": description,
                 "counterparty": counterparty,
@@ -611,6 +616,30 @@ def _slug(value):
     if cleaned:
         return cleaned
     return "unknown"
+
+
+def _signal_dismissal_key(*, signal_type, value):
+    if signal_type == "subscription":
+        return _slug(value)
+    return ""
+
+
+def _filter_dismissed_signals(signals):
+    dismissed_keys = {
+        (item.signal_type, item.signal_key)
+        for item in SavingsSignalDismissal.objects.filter(signal_type__in=DISMISSIBLE_SIGNAL_TYPES)
+    }
+    if not dismissed_keys:
+        return signals
+
+    filtered = []
+    for signal in signals:
+        signal_type = signal.get("type")
+        signal_key = signal.get("dismissalKey")
+        if signal_key and (signal_type, signal_key) in dismissed_keys:
+            continue
+        filtered.append(signal)
+    return filtered
 
 
 def _format_minor_units(amount_minor):

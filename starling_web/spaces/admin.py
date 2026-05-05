@@ -104,6 +104,21 @@ class SyncStateAdmin(admin.ModelAdmin):
     search_fields = ("account_uid", "category_uid")
 
 
+@admin.register(TransactionNote)
+class TransactionNoteAdmin(admin.ModelAdmin):
+    list_display = ("feed_item", "updated_at")
+    search_fields = ("feed_item__feed_item_uid", "note")
+    ordering = ("feed_item__transaction_time",)
+
+
+@admin.register(SavingsSignalDismissal)
+class SavingsSignalDismissalAdmin(admin.ModelAdmin):
+    list_display = ("signal_type", "signal_key", "label", "updated_at")
+    list_filter = ("signal_type",)
+    search_fields = ("signal_type", "signal_key", "label")
+    ordering = ("signal_type", "signal_key")
+
+
 @admin.register(ClassificationRule)
 class ClassificationRuleAdmin(admin.ModelAdmin):
     list_display = (

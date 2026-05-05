@@ -188,6 +188,32 @@
       margin: 0.5rem 0 0;
       color: #64748b;
     }
+    .signal-actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .signal-actions__dismiss {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #475569;
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.82rem;
+    }
+    .signal-actions__dismiss:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    .signals-status {
+      margin: 0.75rem 0 0;
+      color: #475569;
+      font-size: 0.9rem;
+      min-height: 1.2rem;
+    }
   </style>
 
   <section class="card">
@@ -257,10 +283,12 @@
         <tr><td colspan="6">Loading signals…</td></tr>
       </tbody>
     </table>
+    <p id="signals-status" class="signals-status" aria-live="polite"></p>
   </section>
 
   <script>
     const savingsDataEndpoint = "{{ data_endpoint|escapejs }}";
+    const savingsDismissEndpoint = "{{ dismiss_endpoint|escapejs }}";
     const defaultDays = {{ summary_days }};
     const confidenceSelect = document.getElementById('confidence-mode');
     const groupToggle = document.getElementById('signal-group-toggle');
@@ -272,8 +300,11 @@
     const summaryAnnual = document.getElementById('summary-annual');
     const summaryCount = document.getElementById('summary-count');
     const summaryHighConfidence = document.getElementById('summary-high-confidence');
+    const signalsStatus = document.getElementById('signals-status');
 
     let currentGroup = 'all';
+    let currentSignals = [];
+    let dismissingSignalKey = '';
 
     function formatCurrencyFromMinor(valueMinor) {
       const formatter = new Intl.NumberFormat('en-GB', {
@@ -309,6 +340,19 @@
     function setLoadingState(isLoading) {
       refreshButton.disabled = isLoading;
       refreshButton.textContent = isLoading ? 'Refreshing…' : 'Refresh';
+    }
+
+    function setStatus(message) {
+      signalsStatus.textContent = message || '';
+    }
+
+    function getCookie(name) {
+      const cookieValue = `; ${document.cookie}`;
+      const parts = cookieValue.split(`; ${name}=`);
+      if (parts.length !== 2) {
+        return '';
+      }
+      return decodeURIComponent(parts.pop().split(';').shift());
     }
 
     function buildRequestParams() {
@@ -423,18 +467,72 @@
         row.appendChild(annualCell);
 
         const actionCell = document.createElement('td');
+        const actions = document.createElement('div');
+        actions.className = 'signal-actions';
         if (signal.drilldownUrl) {
           const link = document.createElement('a');
           link.href = signal.drilldownUrl;
           link.textContent = 'Review transactions';
-          actionCell.appendChild(link);
-        } else {
+          actions.appendChild(link);
+        }
+        if (signal.dismissible && signal.dismissalKey) {
+          const dismissButton = document.createElement('button');
+          dismissButton.type = 'button';
+          dismissButton.className = 'signal-actions__dismiss';
+          dismissButton.textContent = dismissingSignalKey === signal.dismissalKey ? 'Dismissing…' : 'Dismiss';
+          dismissButton.disabled = dismissingSignalKey === signal.dismissalKey;
+          dismissButton.addEventListener('click', () => {
+            dismissSignal(signal);
+          });
+          actions.appendChild(dismissButton);
+        }
+        if (!actions.childNodes.length) {
           actionCell.textContent = '—';
+        } else {
+          actionCell.appendChild(actions);
         }
         row.appendChild(actionCell);
 
         tableBody.appendChild(row);
       });
+    }
+
+    async function dismissSignal(signal) {
+      if (!signal || !signal.dismissible || !signal.dismissalKey) {
+        return;
+      }
+      dismissingSignalKey = signal.dismissalKey;
+      renderSignalsTable(currentSignals);
+      setStatus('');
+      try {
+        const csrfToken = getCookie('csrftoken');
+        if (!csrfToken) {
+          throw new Error('Unable to determine CSRF token.');
+        }
+        const response = await fetch(savingsDismissEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({
+            signalType: signal.type,
+            signalKey: signal.dismissalKey,
+            label: signal.counterparty || signal.title || '',
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        setStatus(`Dismissed ${signal.counterparty || 'signal'}.`);
+        await loadSignals();
+      } catch (error) {
+        setStatus('Unable to dismiss this recurring charge right now.');
+        await loadSignals();
+      } finally {
+        dismissingSignalKey = '';
+        renderSignalsTable(currentSignals);
+      }
     }
 
     async function loadSignals() {
@@ -447,13 +545,16 @@
         }
         const payload = await response.json();
         const signals = payload.signals || [];
+        currentSignals = signals;
         renderSummary(payload);
         renderTopOpportunities(signals);
         renderSignalsTable(signals);
       } catch (error) {
+        currentSignals = [];
         tableBody.innerHTML = '<tr><td colspan="6">Unable to load savings signals right now.</td></tr>';
         topOpportunities.innerHTML = '';
         topOpportunitiesEmpty.hidden = true;
+        setStatus('');
       } finally {
         setLoadingState(false);
       }

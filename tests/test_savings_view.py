@@ -5,7 +5,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from starling_web.spaces.models import FeedItem
+from starling_web.spaces.models import FeedItem, SavingsSignalDismissal
 
 
 pytestmark = pytest.mark.django_db
@@ -93,6 +93,9 @@ def test_savings_page_renders():
     assert "savings signals" in markup.lower()
     assert "signal-group-toggle" in markup
     assert response.context["data_endpoint"] == reverse("spaces:savings-data")
+    assert response.context["dismiss_endpoint"] == reverse("spaces:savings-dismissals")
+    assert "savingsDismissEndpoint" in markup
+    assert "csrftoken" in response.cookies
 
 
 def test_savings_data_returns_subscription_trend_and_anomaly_signals():
@@ -157,6 +160,57 @@ def test_savings_data_can_filter_by_group():
     assert all(signal["type"] == "subscription" for signal in payload["signals"])
 
 
+def test_savings_data_excludes_dismissed_subscription_signals():
+    _seed_savings_transactions()
+    SavingsSignalDismissal.objects.create(
+        signal_type="subscription",
+        signal_key="netflix",
+        label="Netflix",
+    )
+    client = Client()
+
+    response = client.get(
+        reverse("spaces:savings-data"),
+        {
+            "reference": "2025-01-15T00:00:00Z",
+            "days": 365,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert all(
+        not (
+            signal["type"] == "subscription"
+            and signal.get("counterparty") == "Netflix"
+        )
+        for signal in payload["signals"]
+    )
+
+
+def test_savings_dismissal_persists():
+    client = Client()
+
+    response = client.post(
+        reverse("spaces:savings-dismissals"),
+        data=json.dumps(
+            {
+                "signalType": "subscription",
+                "signalKey": "mortgage-company",
+                "label": "Mortgage Company",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.content.decode())
+    assert payload["saved"] is True
+    assert list(
+        SavingsSignalDismissal.objects.values_list("signal_type", "signal_key", "label")
+    ) == [("subscription", "mortgage-company", "Mortgage Company")]
+
+
 def test_savings_data_rejects_invalid_confidence():
     client = Client()
     response = client.get(reverse("spaces:savings-data"), {"confidence": "nope"})
@@ -166,4 +220,21 @@ def test_savings_data_rejects_invalid_confidence():
 def test_savings_data_rejects_invalid_group():
     client = Client()
     response = client.get(reverse("spaces:savings-data"), {"group": "everything"})
+    assert response.status_code == 400
+
+
+def test_savings_dismissal_rejects_invalid_signal_type():
+    client = Client()
+
+    response = client.post(
+        reverse("spaces:savings-dismissals"),
+        data=json.dumps(
+            {
+                "signalType": "trend",
+                "signalKey": "grocermart",
+            }
+        ),
+        content_type="application/json",
+    )
+
     assert response.status_code == 400
