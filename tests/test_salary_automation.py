@@ -364,6 +364,31 @@ def test_execute_planned_transfer_propagates_non_duplicate_errors(respx_mock):
             )
 
 
+@respx.mock
+def test_execute_planned_transfer_raises_when_success_false(respx_mock):
+    respx_mock.put(
+        url__regex=r"https://api\.starlingbank\.com/api/v2/account/.*/savings-goals/.*/add-money/.*"
+    ).respond(200, json={"success": False, "errors": [{"message": "Insufficient funds"}]})
+
+    transfer = salary_automation.PlannedTransfer(
+        leg="allocation_mortgage",
+        direction="to_space",
+        space_name="Mortgage (monthly)",
+        space_uid="space-mort",
+        amount_minor_units=97000,
+    )
+
+    with httpx.Client(base_url="https://api.starlingbank.com") as client:
+        with pytest.raises(StarlingAPIError, match="Insufficient funds"):
+            salary_automation._execute_planned_transfer(
+                client,
+                account_uid="acc-1",
+                currency="GBP",
+                cycle_id="cycle-1",
+                transfer=transfer,
+            )
+
+
 # ---------------------------------------------------------------------------
 # _request_json_with_payload
 # ---------------------------------------------------------------------------

@@ -542,7 +542,7 @@ def _execute_planned_transfer(
     }
 
     try:
-        _request_json_with_payload(
+        result = _request_json_with_payload(
             client,
             "PUT",
             endpoint,
@@ -554,6 +554,15 @@ def _execute_planned_transfer(
         if _is_duplicate_transfer_error(exc):
             return "already_done"
         raise
+
+    if not result.get("success", True):
+        errors = result.get("errors") or []
+        error_detail = "; ".join(
+            e.get("message", str(e)) for e in errors
+        ) if errors else "no error detail"
+        raise StarlingAPIError(
+            f"Transfer reported failure for {transfer.leg}: {error_detail}"
+        )
 
     return "executed"
 
