@@ -1,0 +1,671 @@
+{% extends "base.html" %}
+
+{% block title %}Holiday Suggestions{% endblock %}
+
+{% block content %}
+  <header>
+    <h1>Holiday suggestions</h1>
+    <p>Review clusters of spending that look trip-related, then confirm which transactions should move into Holidays.</p>
+  </header>
+
+  <style>
+    .holiday-controls {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .holiday-controls__left {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .holiday-controls label {
+      display: block;
+      color: #334155;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+    .holiday-controls label.inline-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-bottom: 0;
+      font-weight: 600;
+    }
+    .holiday-controls select,
+    .holiday-actions select {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 0.45rem 0.65rem;
+      min-width: 180px;
+    }
+    #refresh-holidays,
+    .holiday-actions button {
+      border: none;
+      background: #0f766e;
+      color: #ffffff;
+      border-radius: 999px;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .holiday-actions button.secondary {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    #refresh-holidays:disabled,
+    .holiday-actions button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .summary-card {
+      background: #f8fafc;
+      border: 1px solid #dbe3ef;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .summary-card__label {
+      margin: 0;
+      color: #64748b;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+    }
+    .summary-card__value {
+      margin: 0.2rem 0 0;
+      color: #0f172a;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .holiday-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .holiday-actions .status {
+      min-height: 1.2rem;
+      color: #64748b;
+    }
+    .cluster-list {
+      display: grid;
+      gap: 0.85rem;
+    }
+    .cluster-card {
+      border: 1px solid #dbe3ef;
+      border-radius: 12px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .cluster-card summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 0.85rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+    .cluster-card summary::-webkit-details-marker {
+      display: none;
+    }
+    .cluster-card__title {
+      margin: 0 0 0.25rem;
+      font-size: 1rem;
+      color: #0f172a;
+    }
+    .cluster-card__meta,
+    .cluster-card__reasons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      color: #475569;
+      font-size: 0.85rem;
+    }
+    .cluster-card__body {
+      border-top: 1px solid #e2e8f0;
+      padding: 0.85rem 1rem 1rem;
+    }
+    .cluster-card__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .cluster-card__actions button {
+      border: none;
+      border-radius: 999px;
+      padding: 0.45rem 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.15rem 0.5rem;
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+    .pill.high {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .pill.medium {
+      background: #fef9c3;
+      color: #854d0e;
+    }
+    .pill.low {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .reason-pill {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 0.15rem 0.45rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .holiday-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .holiday-table th,
+    .holiday-table td {
+      padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      vertical-align: top;
+    }
+    .holiday-table th.numeric,
+    .holiday-table td.numeric {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .holiday-table th.select-col,
+    .holiday-table td.select-col {
+      width: 2.25rem;
+      text-align: center;
+    }
+    .holiday-table input[type="checkbox"] {
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .empty-state {
+      color: #64748b;
+      margin: 0.5rem 0 0;
+    }
+  </style>
+
+  <section class="card">
+    <div class="holiday-controls">
+      <div class="holiday-controls__left">
+        <div>
+          <label for="holiday-confidence">Signal style</label>
+          <select id="holiday-confidence">
+            <option value="high">High confidence</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="broad">Broad coverage</option>
+          </select>
+        </div>
+        <div>
+          <label for="holiday-scope">Scope</label>
+          <select id="holiday-scope">
+            <option value="all" selected>All trips</option>
+            <option value="foreign">Foreign only</option>
+            <option value="domestic">Domestic only</option>
+          </select>
+        </div>
+        <div>
+          <label for="holiday-range">Lookback</label>
+          <select id="holiday-range">
+            {% for value, label in range_options %}
+              <option value="{{ value|escape }}" {% if value != "all" and value == summary_days|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <label class="inline-toggle" for="holiday-show-reviewed">
+          <input type="checkbox" id="holiday-show-reviewed" {% if show_reviewed %}checked{% endif %}>
+          Show reviewed
+        </label>
+      </div>
+      <button type="button" id="refresh-holidays">Refresh</button>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <p class="summary-card__label">Clusters</p>
+        <p class="summary-card__value" id="summary-clusters">0</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Candidate transactions</p>
+        <p class="summary-card__value" id="summary-transactions">0</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Suggested transactions</p>
+        <p class="summary-card__value" id="summary-suggested">0</p>
+      </div>
+      <div class="summary-card">
+        <p class="summary-card__label">Suggested spend</p>
+        <p class="summary-card__value" id="summary-spend">£0.00</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="holiday-actions">
+      <label for="recategorise-category">Recategorise selected to</label>
+      <select id="recategorise-category" name="category">
+        {% for option in category_options %}
+          <option value="{{ option|escape }}" {% if option == "Holidays" %}selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" id="accept-selected" class="secondary" disabled>Accept selected</button>
+      <button type="button" id="reject-selected" class="secondary" disabled>Reject selected</button>
+      <button type="button" id="ignore-merchants" class="secondary" disabled>Ignore merchants</button>
+      <button type="button" id="mark-home-merchants" class="secondary" disabled>Mark merchants as home</button>
+      <button type="button" id="mark-anchor-merchants" class="secondary" disabled>Mark merchants as holiday anchor</button>
+      <button type="button" id="recategorise-submit" disabled>Recategorise</button>
+      <span class="status" id="recategorise-status" role="status" aria-live="polite"></span>
+    </div>
+
+    <div id="holiday-clusters" class="cluster-list"></div>
+    <p id="holiday-empty" class="empty-state" hidden>No holiday-like spending clusters found for this filter.</p>
+  </section>
+
+  <template id="holiday-cluster-actions-template">
+    <div class="cluster-card__actions">
+      <button type="button" data-action="select-all">Select all in cluster</button>
+      <button type="button" data-action="deselect-all">Deselect all in cluster</button>
+      <button type="button" data-action="accept-cluster">Accept this cluster</button>
+    </div>
+  </template>
+
+  <script>
+    const holidayDataEndpoint = "{{ data_endpoint|escapejs }}";
+    const holidayFeedbackEndpoint = "{{ feedback_endpoint|escapejs }}";
+    const holidayMerchantOverrideEndpoint = "{{ merchant_override_endpoint|escapejs }}";
+    const recategoriseEndpoint = "{% url 'spaces:spending-recategorise' %}";
+    const confidenceSelect = document.getElementById('holiday-confidence');
+    const scopeSelect = document.getElementById('holiday-scope');
+    const rangeSelect = document.getElementById('holiday-range');
+    const showReviewedToggle = document.getElementById('holiday-show-reviewed');
+    const refreshButton = document.getElementById('refresh-holidays');
+    const summaryClusters = document.getElementById('summary-clusters');
+    const summaryTransactions = document.getElementById('summary-transactions');
+    const summarySuggested = document.getElementById('summary-suggested');
+    const summarySpend = document.getElementById('summary-spend');
+    const clustersContainer = document.getElementById('holiday-clusters');
+    const emptyState = document.getElementById('holiday-empty');
+    const recategoriseCategory = document.getElementById('recategorise-category');
+    const acceptButton = document.getElementById('accept-selected');
+    const rejectButton = document.getElementById('reject-selected');
+    const ignoreMerchantsButton = document.getElementById('ignore-merchants');
+    const markHomeMerchantsButton = document.getElementById('mark-home-merchants');
+    const markAnchorMerchantsButton = document.getElementById('mark-anchor-merchants');
+    const recategoriseButton = document.getElementById('recategorise-submit');
+    const recategoriseStatus = document.getElementById('recategorise-status');
+    const clusterActionsTemplate = document.getElementById('holiday-cluster-actions-template');
+    const earliestTransactionTime = "{{ earliest_transaction_time|escapejs }}";
+
+    let currentClusters = [];
+    const selectedTransactionIds = new Set();
+    const transactionLookup = new Map();
+    const checkboxLookup = new Map();
+
+    function getCookie(name) {
+      const cookieString = document.cookie || '';
+      if (!cookieString) {
+        return null;
+      }
+      const cookies = cookieString.split('; ');
+      for (let i = 0; i < cookies.length; i += 1) {
+        const [key, ...rest] = cookies[i].split('=');
+        if (key === name) {
+          return decodeURIComponent(rest.join('='));
+        }
+      }
+      return null;
+    }
+
+    function formatCurrencyFromMinor(value) {
+      return new Intl.NumberFormat('en-GB', {
+        style: 'currency',
+        currency: 'GBP',
+      }).format((Number(value || 0)) / 100);
+    }
+
+    function updateSelectionControls() {
+      const disabled = selectedTransactionIds.size === 0;
+      recategoriseButton.disabled = disabled;
+      acceptButton.disabled = disabled;
+      rejectButton.disabled = disabled;
+      ignoreMerchantsButton.disabled = disabled;
+      markHomeMerchantsButton.disabled = disabled;
+      markAnchorMerchantsButton.disabled = disabled;
+    }
+
+    function handleTransactionSelection(feedItemUid, checked) {
+      if (checked) {
+        selectedTransactionIds.add(feedItemUid);
+      } else {
+        selectedTransactionIds.delete(feedItemUid);
+      }
+      recategoriseStatus.textContent = '';
+      updateSelectionControls();
+    }
+
+    function setTransactionsSelected(feedItemUids, checked) {
+      feedItemUids.forEach((feedItemUid) => {
+        if (checked) {
+          selectedTransactionIds.add(feedItemUid);
+        } else {
+          selectedTransactionIds.delete(feedItemUid);
+        }
+        const checkbox = checkboxLookup.get(feedItemUid);
+        if (checkbox) {
+          checkbox.checked = checked;
+        }
+      });
+      recategoriseStatus.textContent = '';
+      updateSelectionControls();
+    }
+
+    function renderClusters() {
+      clustersContainer.innerHTML = '';
+      transactionLookup.clear();
+      checkboxLookup.clear();
+      if (!currentClusters.length) {
+        emptyState.hidden = false;
+        return;
+      }
+      emptyState.hidden = true;
+
+      currentClusters.forEach((cluster, clusterIndex) => {
+        const details = document.createElement('details');
+        details.className = 'cluster-card';
+        if (clusterIndex === 0) {
+          details.open = true;
+        }
+
+        const summary = document.createElement('summary');
+        summary.innerHTML = `
+          <div>
+            <p class="cluster-card__title">${cluster.title}</p>
+            <div class="cluster-card__meta">
+              <span>${new Date(cluster.start).toLocaleDateString('en-GB')} to ${new Date(cluster.end).toLocaleDateString('en-GB')}</span>
+              <span>${cluster.suggestedTransactionCount} suggested</span>
+              <span>${formatCurrencyFromMinor(cluster.totalSuggestedMinor)}</span>
+            </div>
+            <div class="cluster-card__reasons">
+              ${(cluster.reasons || []).slice(0, 4).map((reason) => `<span class="reason-pill">${reason}</span>`).join('')}
+            </div>
+          </div>
+          <span class="pill ${cluster.confidenceBand}">${cluster.confidenceBand}</span>
+        `;
+        details.appendChild(summary);
+
+        const body = document.createElement('div');
+        body.className = 'cluster-card__body';
+        const clusterTransactionIds = (cluster.transactions || []).map((txn) => txn.feedItemUid);
+
+        const clusterActions = clusterActionsTemplate.content.firstElementChild.cloneNode(true);
+        clusterActions.querySelector('[data-action="select-all"]').addEventListener('click', () => {
+          setTransactionsSelected(clusterTransactionIds, true);
+        });
+        clusterActions.querySelector('[data-action="deselect-all"]').addEventListener('click', () => {
+          setTransactionsSelected(clusterTransactionIds, false);
+        });
+        clusterActions.querySelector('[data-action="accept-cluster"]').addEventListener('click', () => {
+          applyFeedback('accepted', clusterTransactionIds);
+        });
+        body.appendChild(clusterActions);
+
+        const table = document.createElement('table');
+        table.className = 'holiday-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th scope="col" class="select-col"></th>
+              <th scope="col">Date</th>
+              <th scope="col">Counterparty</th>
+              <th scope="col">Category</th>
+              <th scope="col">Signals</th>
+              <th scope="col" class="numeric">Amount</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+
+        const tableBody = table.querySelector('tbody');
+        (cluster.transactions || []).forEach((txn) => {
+          transactionLookup.set(txn.feedItemUid, txn);
+
+          const row = document.createElement('tr');
+          const selectCell = document.createElement('td');
+          selectCell.className = 'select-col';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = selectedTransactionIds.has(txn.feedItemUid);
+          checkboxLookup.set(txn.feedItemUid, checkbox);
+          checkbox.addEventListener('change', (event) => {
+            handleTransactionSelection(txn.feedItemUid, event.target.checked);
+          });
+          selectCell.appendChild(checkbox);
+          row.appendChild(selectCell);
+
+          const dateCell = document.createElement('td');
+          dateCell.textContent = new Date(txn.transactionTime).toLocaleDateString('en-GB');
+          row.appendChild(dateCell);
+
+          const counterpartyCell = document.createElement('td');
+          counterpartyCell.textContent = txn.counterparty || '(unknown)';
+          row.appendChild(counterpartyCell);
+
+          const categoryCell = document.createElement('td');
+          categoryCell.textContent = txn.category || 'Uncategorised';
+          row.appendChild(categoryCell);
+
+          const reasonCell = document.createElement('td');
+          reasonCell.innerHTML = (txn.reasons || []).map((reason) => `<span class="reason-pill">${reason}</span>`).join(' ');
+          row.appendChild(reasonCell);
+
+          const amountCell = document.createElement('td');
+          amountCell.className = 'numeric';
+          amountCell.textContent = formatCurrencyFromMinor(txn.amountMinorUnits);
+          row.appendChild(amountCell);
+
+          tableBody.appendChild(row);
+        });
+
+        body.appendChild(table);
+        details.appendChild(body);
+        clustersContainer.appendChild(details);
+      });
+
+      updateSelectionControls();
+    }
+
+    function getSelectedTransactions() {
+      return Array.from(selectedTransactionIds)
+        .map((feedItemUid) => transactionLookup.get(feedItemUid))
+        .filter(Boolean);
+    }
+
+    async function postJson(url, payload) {
+      const csrfToken = getCookie('csrftoken');
+      if (!csrfToken) {
+        throw new Error('Unable to determine CSRF token.');
+      }
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error('Request failed');
+      }
+      return response.json();
+    }
+
+    function updateSummary(summary) {
+      summaryClusters.textContent = String(summary?.clustersCount || 0);
+      summaryTransactions.textContent = String(summary?.transactionsCount || 0);
+      summarySuggested.textContent = String(summary?.suggestedTransactionsCount || 0);
+      summarySpend.textContent = formatCurrencyFromMinor(summary?.totalSuggestedMinor || 0);
+    }
+
+    async function loadClusters() {
+      refreshButton.disabled = true;
+      recategoriseStatus.textContent = '';
+      selectedTransactionIds.clear();
+      try {
+        const params = new URLSearchParams();
+        params.set('confidence', confidenceSelect.value || 'balanced');
+        params.set('scope', scopeSelect.value || 'all');
+        if ((rangeSelect.value || '365') === 'all') {
+          if (earliestTransactionTime) {
+            params.set('start', earliestTransactionTime);
+          } else {
+            params.set('days', '{{ summary_days }}');
+          }
+        } else {
+          params.set('days', rangeSelect.value || '{{ summary_days }}');
+        }
+        if (showReviewedToggle.checked) {
+          params.set('show_reviewed', '1');
+        }
+        const response = await fetch(`${holidayDataEndpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error('Unable to load holiday suggestions');
+        }
+        const payload = await response.json();
+        currentClusters = payload.clusters || [];
+        updateSummary(payload.summary || {});
+        renderClusters();
+      } catch (error) {
+        currentClusters = [];
+        updateSummary({});
+        clustersContainer.innerHTML = '';
+        emptyState.hidden = false;
+        emptyState.textContent = 'Unable to load holiday suggestions right now.';
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    async function applyRecategorisation() {
+      const targetCategory = (recategoriseCategory.value || '').trim();
+      if (!targetCategory) {
+        recategoriseStatus.textContent = 'Choose a category first.';
+        return;
+      }
+      recategoriseButton.disabled = true;
+      recategoriseButton.textContent = 'Recategorising…';
+      recategoriseStatus.textContent = '';
+      try {
+        const payload = await postJson(recategoriseEndpoint, {
+          feedItemUids: Array.from(selectedTransactionIds),
+          category: targetCategory,
+        });
+        recategoriseStatus.textContent = `Updated ${payload.updated || 0} transaction${payload.updated === 1 ? '' : 's'}.`;
+        await loadClusters();
+      } catch (error) {
+        recategoriseStatus.textContent = 'Unable to recategorise transactions. Please try again.';
+        updateSelectionControls();
+      } finally {
+        recategoriseButton.textContent = 'Recategorise';
+      }
+    }
+
+    async function applyFeedback(decision, explicitFeedItemUids = null) {
+      const feedItemUids = explicitFeedItemUids || getSelectedTransactions().map((txn) => txn.feedItemUid);
+      if (!feedItemUids.length) {
+        recategoriseStatus.textContent = 'Select transactions first.';
+        return;
+      }
+      recategoriseStatus.textContent = '';
+      try {
+        const payload = await postJson(holidayFeedbackEndpoint, {
+          feedItemUids,
+          decision,
+        });
+        recategoriseStatus.textContent = `Saved ${payload.updated || 0} ${decision} decision${payload.updated === 1 ? '' : 's'}.`;
+        await loadClusters();
+      } catch (error) {
+        recategoriseStatus.textContent = 'Unable to save holiday feedback right now.';
+        updateSelectionControls();
+      }
+    }
+
+    async function applyMerchantOverride(overrideType) {
+      const selectedTransactions = getSelectedTransactions();
+      if (!selectedTransactions.length) {
+        recategoriseStatus.textContent = 'Select transactions first.';
+        return;
+      }
+
+      const merchants = Array.from(
+        new Map(
+          selectedTransactions
+            .filter((txn) => txn.merchantKey || txn.counterparty || txn.reference)
+            .map((txn) => {
+              const merchantKey = txn.merchantKey || '';
+              const label = txn.counterparty || txn.reference || merchantKey;
+              return [merchantKey, { merchantKey, label }];
+            })
+            .filter(([merchantKey]) => merchantKey)
+        ).values()
+      );
+
+      if (!merchants.length) {
+        recategoriseStatus.textContent = 'No merchant data available for the selected transactions.';
+        return;
+      }
+
+      recategoriseStatus.textContent = '';
+      try {
+        const payload = await postJson(holidayMerchantOverrideEndpoint, {
+          merchants,
+          overrideType,
+        });
+        recategoriseStatus.textContent = `Saved ${payload.updated || 0} merchant override${payload.updated === 1 ? '' : 's'}.`;
+        await loadClusters();
+      } catch (error) {
+        recategoriseStatus.textContent = 'Unable to save merchant overrides right now.';
+        updateSelectionControls();
+      }
+    }
+
+    refreshButton.addEventListener('click', loadClusters);
+    recategoriseButton.addEventListener('click', applyRecategorisation);
+    acceptButton.addEventListener('click', () => applyFeedback('accepted'));
+    rejectButton.addEventListener('click', () => applyFeedback('rejected'));
+    ignoreMerchantsButton.addEventListener('click', () => applyMerchantOverride('ignore'));
+    markHomeMerchantsButton.addEventListener('click', () => applyMerchantOverride('home'));
+    markAnchorMerchantsButton.addEventListener('click', () => applyMerchantOverride('holiday_anchor'));
+    loadClusters();
+  </script>
+{% endblock %}

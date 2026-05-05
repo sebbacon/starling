@@ -106,9 +106,26 @@ class ClassificationRuleAdmin(admin.ModelAdmin):
         "reason",
         "pattern",
         "space_uid",
+        "amount_bounds_display",
         "start_date",
         "end_date",
     )
     list_filter = ("rule_type",)
     search_fields = ("category", "reason", "pattern", "space_uid")
     ordering = ("position", "id")
+
+
+@admin.register(HolidayMerchantOverride)
+class HolidayMerchantOverrideAdmin(admin.ModelAdmin):
+    list_display = ("merchant_key", "label", "override_type", "updated_at")
+    list_filter = ("override_type",)
+    search_fields = ("merchant_key", "label")
+    ordering = ("merchant_key",)
+
+
+@admin.register(HolidaySuggestionDecision)
+class HolidaySuggestionDecisionAdmin(admin.ModelAdmin):
+    list_display = ("feed_item_uid", "decision", "updated_at")
+    list_filter = ("decision",)
+    search_fields = ("feed_item_uid",)
+    ordering = ("feed_item_uid",)

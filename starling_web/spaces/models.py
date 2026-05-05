@@ -94,6 +94,61 @@ class FeedItem(models.Model):
         return self.feed_item_uid
 
 
+class TransactionNote(models.Model):
+    feed_item = models.OneToOneField(FeedItem, on_delete=models.CASCADE, related_name="transaction_note")
+    note = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("feed_item_id",)
+
+    def __str__(self):
+        return self.feed_item_id
+
+
+class SavingsSignalDismissal(models.Model):
+    signal_type = models.CharField(max_length=32)
+    signal_key = models.CharField(max_length=255)
+    label = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("signal_type", "signal_key")
+        unique_together = ("signal_type", "signal_key")
+
+    def __str__(self):
+        return f"{self.signal_type}:{self.signal_key}"
+
+
+class HolidayMerchantOverride(models.Model):
+    merchant_key = models.CharField(max_length=255, unique=True)
+    label = models.CharField(max_length=255, blank=True, null=True)
+    override_type = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("merchant_key",)
+
+    def __str__(self):
+        return f"{self.merchant_key}: {self.override_type}"
+
+
+class HolidaySuggestionDecision(models.Model):
+    feed_item_uid = models.CharField(max_length=64, unique=True)
+    decision = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("feed_item_uid",)
+
+    def __str__(self):
+        return f"{self.feed_item_uid}: {self.decision}"
+
+
 class SyncState(models.Model):
     account_uid = models.CharField(max_length=64)
     category_uid = models.CharField(max_length=64)
