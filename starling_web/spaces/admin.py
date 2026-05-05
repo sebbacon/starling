@@ -35,6 +35,13 @@ class CategoryAdmin(admin.ModelAdmin):
     search_fields = ("account_uid", "category_uid", "name")
 
 
+@admin.register(CounterpartyNote)
+class CounterpartyNoteAdmin(admin.ModelAdmin):
+    list_display = ("counterparty", "updated_at")
+    search_fields = ("counterparty", "note")
+    ordering = ("counterparty",)
+
+
 class FeedItemCategoryStateFilter(admin.SimpleListFilter):
     title = "category state"
     parameter_name = "category_state"

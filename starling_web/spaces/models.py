@@ -37,6 +37,20 @@ class Category(models.Model):
         return self.name or f"{self.category_type}:{self.category_uid}"
 
 
+class CounterpartyNote(models.Model):
+    counterparty = models.CharField(max_length=255)
+    counterparty_key = models.CharField(max_length=255, unique=True)
+    note = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("counterparty_key",)
+
+    def __str__(self):
+        return self.counterparty
+
+
 class ClassificationRule(models.Model):
     position = models.PositiveIntegerField(unique=True)
     rule_type = models.CharField(max_length=32)
