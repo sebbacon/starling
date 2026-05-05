@@ -93,17 +93,57 @@ def test_manage_rules_creates_new_rule():
         reverse("spaces:classification-rules"),
         data={
             "position": 5,
-            "rule_type": "space",
-            "category": "Mortgage",
-            "reason": "space override",
-            "space_uid": "space-123",
+            "rule_type": "amount_range",
+            "category": "Expenses",
+            "reason": "small income",
+            "min_amount": "0.01",
+            "max_amount": "499.99",
         },
     )
     assert response.status_code == 302
     rule = ClassificationRule.objects.get()
-    assert rule.rule_type == "space"
-    assert rule.category == "Mortgage"
-    assert rule.space_uid == "space-123"
+    assert rule.rule_type == "amount_range"
+    assert rule.category == "Expenses"
+    assert rule.min_amount_minor_units == 1
+    assert rule.max_amount_minor_units == 49999
+
+
+def test_manage_rules_creates_spending_rule_with_negative_bounds():
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(
+        reverse("spaces:classification-rules"),
+        data={
+            "position": 5,
+            "rule_type": "counterparty_regex",
+            "category": "Food",
+            "reason": "small leisure charge",
+            "pattern": "Stratford Park Leisure",
+            "min_amount": "-6.00",
+            "max_amount": "-1.00",
+        },
+    )
+    assert response.status_code == 302
+    rule = ClassificationRule.objects.get()
+    assert rule.min_amount_minor_units == -600
+    assert rule.max_amount_minor_units == -100
+
+
+def test_manage_rules_creates_classified_category_regex_rule():
+    client = Client(enforce_csrf_checks=False)
+    response = client.post(
+        reverse("spaces:classification-rules"),
+        data={
+            "position": 5,
+            "rule_type": "classified_category_regex",
+            "category": "Lifestyle & Entertainment",
+            "reason": "merge categories",
+            "pattern": "(?i)^(Lifestyle|Entertainment)$",
+        },
+    )
+    assert response.status_code == 302
+    rule = ClassificationRule.objects.get(rule_type="classified_category_regex")
+    assert rule.category == "Lifestyle & Entertainment"
+    assert rule.pattern == "(?i)^(Lifestyle|Entertainment)$"
 
 
 def test_manage_rules_updates_existing_rule():
@@ -164,6 +204,42 @@ def test_manage_rules_provides_space_and_path_choices(sample_feed_item):
     assert "merchant.name" in json_values
 
 
+def test_manage_rules_prefills_existing_amount_bounds():
+    rule = ClassificationRule.objects.create(
+        position=0,
+        rule_type="counterparty_regex",
+        category="Salary",
+        reason="salary",
+        pattern="University Of Oxfo",
+        min_amount_minor_units=500000,
+    )
+
+    client = Client()
+    response = client.get(reverse("spaces:classification-rules"), {"rule": rule.id})
+    assert response.status_code == 200
+    form = response.context["form"]
+    assert form.initial.get("min_amount") == "5000.00"
+
+
+def test_manage_rules_prefills_existing_negative_amount_bounds():
+    rule = ClassificationRule.objects.create(
+        position=0,
+        rule_type="counterparty_regex",
+        category="Food",
+        reason="small spend",
+        pattern="Stratford Park Leisure",
+        min_amount_minor_units=-600,
+        max_amount_minor_units=-100,
+    )
+
+    client = Client()
+    response = client.get(reverse("spaces:classification-rules"), {"rule": rule.id})
+    assert response.status_code == 200
+    form = response.context["form"]
+    assert form.initial.get("min_amount") == "-6.00"
+    assert form.initial.get("max_amount") == "-1.00"
+
+
 def test_manage_rules_prefills_from_query():
     client = Client()
     response = client.get(
@@ -174,6 +250,20 @@ def test_manage_rules_prefills_from_query():
     form = response.context["form"]
     assert form.initial.get("pattern") == "VetSuccess"
     assert form.initial.get("rule_type") == "counterparty_regex"
+
+
+def test_manage_rules_page_explains_amounts_are_entered_in_pounds():
+    client = Client()
+    response = client.get(reverse("spaces:classification-rules"))
+    assert response.status_code == 200
+    content = response.content.decode()
+    form = response.context["form"]
+    assert "inclusive lower bound in pounds" in form.fields["min_amount"].help_text
+    assert "-100 minor units" in form.fields["min_amount"].help_text
+    assert "entered in pounds" in content
+    assert "-1.00" in content
+    assert "1.00" in content
+    assert "-100" in content
 
 
 def test_apply_rules_triggers_command(monkeypatch):

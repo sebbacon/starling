@@ -45,6 +45,8 @@ class ClassificationRule(models.Model):
     pattern = models.CharField(max_length=255, blank=True, null=True)
     space_uid = models.CharField(max_length=64, blank=True, null=True)
     json_path = models.CharField(max_length=255, blank=True, null=True)
+    min_amount_minor_units = models.BigIntegerField(blank=True, null=True)
+    max_amount_minor_units = models.BigIntegerField(blank=True, null=True)
     start_date = models.DateField(blank=True, null=True)
     end_date = models.DateField(blank=True, null=True)
 
@@ -54,6 +56,15 @@ class ClassificationRule(models.Model):
     def __str__(self):
         label = self.reason or self.rule_type
         return f"{self.position}: {label}"
+
+    @property
+    def amount_bounds_display(self):
+        parts = []
+        if self.min_amount_minor_units is not None:
+            parts.append(f"min GBP {self.min_amount_minor_units / 100:,.2f}")
+        if self.max_amount_minor_units is not None:
+            parts.append(f"max GBP {self.max_amount_minor_units / 100:,.2f}")
+        return ", ".join(parts) if parts else "—"
 
 
 class FeedItem(models.Model):

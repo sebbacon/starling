@@ -219,6 +219,47 @@ def test_reclassify_transactions_updates(tmp_path, monkeypatch):
     assert item.classification_reason == "counterparty"
 
 
+@pytest.mark.django_db
+def test_reclassify_transactions_applies_classified_category_remap():
+    FeedItem.objects.create(
+        feed_item_uid="tx-remap-1",
+        account_uid="acc-1",
+        category_uid="cat-1",
+        space_uid="",
+        direction="OUT",
+        amount_minor_units=-1099,
+        currency="GBP",
+        transaction_time=datetime(2024, 11, 10, 10, 0, tzinfo=timezone.utc),
+        source="CARD",
+        counterparty="Netflix",
+        spending_category="ENTERTAINMENT",
+        classified_category="Entertainment",
+        classification_reason="starling_fallback",
+        raw_json={},
+    )
+
+    from starling_spaces import classification
+
+    ClassificationRule.objects.bulk_create(
+        [
+            ClassificationRule(
+                position=50,
+                rule_type="classified_category_regex",
+                category="Lifestyle & Entertainment",
+                reason="combined_category",
+                pattern="(?i)^(Lifestyle|Entertainment)$",
+            ),
+        ]
+    )
+    classification.reset_rules_cache()
+
+    call_command("reclassify_transactions")
+
+    item = FeedItem.objects.get(feed_item_uid="tx-remap-1")
+    assert item.classified_category == "Lifestyle & Entertainment"
+    assert item.classification_reason == "combined_category"
+
+
 def test_report_spaces_filters_accounts(monkeypatch, capsys):
     monkeypatch.setenv("STARLING_PAT", "token")
 

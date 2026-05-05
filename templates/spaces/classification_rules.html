@@ -56,6 +56,12 @@
           Date ranges are optional. When provided, the rule applies only to transactions whose timestamp falls within
           the inclusive window.
         </p>
+        <p class="tip">
+          Amount bounds are entered in pounds and are inclusive. Use signed values: spending rules should use
+          negative amounts, and income rules should use positive amounts. For example, enter <code>-1.00</code> for
+          a £1.00 card charge and <code>1.00</code> for £1.00 of income. Internally those are stored as
+          <code>-100</code> and <code>100</code> minor units.
+        </p>
       </section>
     </div>
   </section>
@@ -72,6 +78,7 @@
               <th>Reason</th>
               <th>Category</th>
               <th>Pattern / Space / Path</th>
+              <th>Amount</th>
               <th>Dates</th>
               <th></th>
             </tr>
@@ -86,6 +93,7 @@
                 <td>
                   {% if rule.pattern %}{{ rule.pattern }}{% elif rule.space_uid %}{{ rule.space_uid }}{% elif rule.json_path %}{{ rule.json_path }}{% else %}—{% endif %}
                 </td>
+                <td>{{ rule.amount_bounds_display }}</td>
                 <td>
                   {% if rule.start_date or rule.end_date %}
                     {{ rule.start_date|default:"…" }} → {{ rule.end_date|default:"…" }}

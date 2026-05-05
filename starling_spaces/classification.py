@@ -20,11 +20,16 @@ class Classification:
 
 
 def classify_transaction(transaction: Dict[str, Any]) -> Classification:
-    for rule in _load_rules():
+    rules = _load_rules()
+    post_rules = [rule for rule in rules if _is_post_classification_rule(rule)]
+    for rule in rules:
+        if _is_post_classification_rule(rule):
+            continue
         result = _apply_rule(rule, transaction)
         if result:
-            return result
-    return Classification(category="Uncategorised", reason="fallback")
+            return _apply_post_classification_rules(post_rules, transaction, result)
+    fallback = Classification(category="Uncategorised", reason="fallback")
+    return _apply_post_classification_rules(post_rules, transaction, fallback)
 
 
 def _apply_rule(rule: Dict[str, Any], tx: Dict[str, Any]) -> Optional[Classification]:
@@ -33,6 +38,8 @@ def _apply_rule(rule: Dict[str, Any], tx: Dict[str, Any]) -> Optional[Classifica
 
     tx_time = tx.get("transaction_time")
     if not _rule_active_for_timestamp(rule, tx_time):
+        return None
+    if not _rule_matches_amount(rule, tx.get("amount_minor_units")):
         return None
 
     if rule_type == "space":
@@ -71,7 +78,49 @@ def _apply_rule(rule: Dict[str, Any], tx: Dict[str, Any]) -> Optional[Classifica
         if json_path and category:
             if _match_json_path(tx.get("raw"), json_path):
                 return Classification(category=category, reason=reason)
+    elif rule_type == "amount_range":
+        category = rule.get("category")
+        if category and _rule_has_amount_bounds(rule):
+            return Classification(category=category, reason=reason)
 
+    return None
+
+
+def _is_post_classification_rule(rule: Dict[str, Any]) -> bool:
+    return rule.get("type") == "classified_category_regex"
+
+
+def _apply_post_classification_rules(
+    rules: List[Dict[str, Any]],
+    tx: Dict[str, Any],
+    current: Classification,
+) -> Classification:
+    for rule in rules:
+        result = _apply_post_classification_rule(rule, tx, current)
+        if result:
+            return result
+    return current
+
+
+def _apply_post_classification_rule(
+    rule: Dict[str, Any],
+    tx: Dict[str, Any],
+    current: Classification,
+) -> Optional[Classification]:
+    reason = rule.get("reason", rule.get("type") or "rule")
+
+    tx_time = tx.get("transaction_time")
+    if not _rule_active_for_timestamp(rule, tx_time):
+        return None
+    if not _rule_matches_amount(rule, tx.get("amount_minor_units")):
+        return None
+
+    if rule.get("type") != "classified_category_regex":
+        return None
+
+    pattern = rule.get("pattern")
+    if pattern and current.category and re.search(pattern, current.category):
+        return Classification(category=rule["category"], reason=reason)
     return None
 
 
@@ -135,6 +184,10 @@ def _load_rules_from_db() -> Optional[List[Dict[str, Any]]]:
             entry["space_uid"] = record.space_uid
         if record.json_path:
             entry["path"] = record.json_path
+        if record.min_amount_minor_units is not None:
+            entry["min_amount_minor_units"] = record.min_amount_minor_units
+        if record.max_amount_minor_units is not None:
+            entry["max_amount_minor_units"] = record.max_amount_minor_units
         if record.start_date:
             entry["start_date"] = record.start_date
         if record.end_date:
@@ -192,5 +245,26 @@ def _rule_active_for_timestamp(rule: Dict[str, Any], timestamp: Any) -> bool:
     if start_date and tx_date < start_date:
         return False
     if end_date and tx_date > end_date:
+        return False
+    return True
+
+
+def _rule_has_amount_bounds(rule: Dict[str, Any]) -> bool:
+    return (
+        rule.get("min_amount_minor_units") is not None
+        or rule.get("max_amount_minor_units") is not None
+    )
+
+
+def _rule_matches_amount(rule: Dict[str, Any], amount: Any) -> bool:
+    min_amount = rule.get("min_amount_minor_units")
+    max_amount = rule.get("max_amount_minor_units")
+    if min_amount is None and max_amount is None:
+        return True
+    if amount is None:
+        return False
+    if min_amount is not None and amount < min_amount:
+        return False
+    if max_amount is not None and amount > max_amount:
         return False
     return True
