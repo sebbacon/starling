@@ -803,9 +803,9 @@ def test_run_salary_automation_anchors_drawdown_to_month_start_balances(respx_mo
     first_release = next(action for action in first["actions"] if action["leg"] == "release_q2")
     second_release = next(action for action in second["actions"] if action["leg"] == "release_q2")
 
-    assert first_release["amountMinorUnits"] == 79500
+    assert first_release["amountMinorUnits"] == 78875
     assert first_release["result"] == "not_due"
-    assert second_release["amountMinorUnits"] == 79500
+    assert second_release["amountMinorUnits"] == 78875
     assert second_release["result"] == "would_execute"
     assert second["dueReleaseCount"] == 1
 

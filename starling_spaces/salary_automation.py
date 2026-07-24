@@ -30,7 +30,7 @@ SALARY_LOOKBACK_DAYS = 62
 SALARY_DRAWDOWN_SPACE = "Salary drawdown"
 
 FIXED_ALLOCATIONS = (
-    ("mortgage", "Mortgage (monthly)", 97000),
+    ("mortgage", "Mortgage (monthly)", 99500),
     ("groceries", "Groceries (monthly)", 80000),
     ("holidays", "Holidays", 40000),
 )
