@@ -278,11 +278,11 @@ def test_plan_initial_allocations_raises_when_salary_insufficient():
 
 
 # ---------------------------------------------------------------------------
-# _resolve_top_up_cycle_start_balances
+# _resolve_top_up_balances_before_salary
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_top_up_cycle_start_balances_rewinds_month_activity(monkeypatch):
+def test_resolve_top_up_balances_before_salary_rewinds_activity_since_salary(monkeypatch):
     spaces = _make_spaces(bills_balance=90000, kids_balance=15000)
     space_feed_by_category = {
         "s-bills": [
@@ -313,11 +313,11 @@ def test_resolve_top_up_cycle_start_balances_rewinds_month_activity(monkeypatch)
         fake_fetch,
     )
 
-    balances = salary_automation._resolve_top_up_cycle_start_balances(
+    balances = salary_automation._resolve_top_up_balances_before_salary(
         None,
         account_uid="acc-1",
         spaces=spaces,
-        cycle_start=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+        anchor_time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
     )
 
     assert balances == {
@@ -808,6 +808,144 @@ def test_run_salary_automation_anchors_drawdown_to_month_start_balances(respx_mo
     assert second_release["amountMinorUnits"] == 78875
     assert second_release["result"] == "would_execute"
     assert second["dueReleaseCount"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Drawdown funding stays stable once the top-up transfer has actually landed
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_run_salary_automation_drawdown_funding_survives_completed_topups(respx_mock):
+    respx_mock.get("https://api.starlingbank.com/api/v2/accounts").respond(
+        json={
+            "accounts": [
+                {
+                    "accountUid": "acc-1",
+                    "name": "Joint",
+                    "currency": "GBP",
+                    "defaultCategory": "cat-1",
+                }
+            ]
+        }
+    )
+
+    spaces_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/account/acc-1/spaces"
+    )
+    # First run: the moment before this cycle's top-up has ever executed.
+    # Second run: days later, after the top-up has landed (Bills/Kids at
+    # target) and some of it has already been spent.
+    spaces_route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "spaceList": [
+                    {"spaceUid": "s1", "name": "Mortgage (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s2", "name": "Groceries (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s3", "name": "Holidays", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                    {"spaceUid": "s4", "name": "Bills (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 32527}},
+                    {"spaceUid": "s5", "name": "Kids (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 3800}},
+                    {"spaceUid": "s6", "name": "Salary drawdown", "totalSaved": {"currency": "GBP", "minorUnits": 0}},
+                ]
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "spaceList": [
+                    {"spaceUid": "s1", "name": "Mortgage (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 99500}},
+                    {"spaceUid": "s2", "name": "Groceries (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 80000}},
+                    {"spaceUid": "s3", "name": "Holidays", "totalSaved": {"currency": "GBP", "minorUnits": 40000}},
+                    {"spaceUid": "s4", "name": "Bills (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 90000}},
+                    {"spaceUid": "s5", "name": "Kids (monthly)", "totalSaved": {"currency": "GBP", "minorUnits": 30000}},
+                    {"spaceUid": "s6", "name": "Salary drawdown", "totalSaved": {"currency": "GBP", "minorUnits": 182710}},
+                ]
+            },
+        ),
+    ]
+
+    respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/cat-1"
+    ).respond(
+        json={
+            "feedItems": [
+                {
+                    "feedItemUid": "salary-1",
+                    "transactionTime": "2026-08-26T23:01:00Z",
+                    "amount": {"currency": "GBP", "minorUnits": 566787},
+                    "direction": "IN",
+                    "counterPartyName": "University of Oxford Payroll",
+                }
+            ],
+            "pageable": {"next": None},
+        }
+    )
+
+    bills_feed_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s4"
+    )
+    bills_feed_route.side_effect = [
+        httpx.Response(200, json={"feedItems": [], "pageable": {"next": None}}),
+        httpx.Response(
+            200,
+            json={
+                "feedItems": [
+                    {
+                        "feedItemUid": "bills-topup",
+                        "amount": {"currency": "GBP", "minorUnits": 77473},
+                        "direction": "IN",
+                        "transactionTime": "2026-08-27T17:56:33Z",
+                    },
+                    {
+                        "feedItemUid": "bills-spend-1",
+                        "amount": {"currency": "GBP", "minorUnits": 20000},
+                        "direction": "OUT",
+                        "transactionTime": "2026-09-02T09:00:00Z",
+                    },
+                ],
+                "pageable": {"next": None},
+            },
+        ),
+    ]
+
+    kids_feed_route = respx_mock.get(
+        "https://api.starlingbank.com/api/v2/feed/account/acc-1/category/s5"
+    )
+    kids_feed_route.side_effect = [
+        httpx.Response(200, json={"feedItems": [], "pageable": {"next": None}}),
+        httpx.Response(
+            200,
+            json={
+                "feedItems": [
+                    {
+                        "feedItemUid": "kids-topup",
+                        "amount": {"currency": "GBP", "minorUnits": 26200},
+                        "direction": "IN",
+                        "transactionTime": "2026-08-27T17:56:33Z",
+                    },
+                ],
+                "pageable": {"next": None},
+            },
+        ),
+    ]
+
+    first = salary_automation.run_salary_automation(
+        "TOKEN",
+        now=datetime(2026, 8, 26, 23, 1, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+    second = salary_automation.run_salary_automation(
+        "TOKEN",
+        now=datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+
+    # Without the fix, the second run would see Bills/Kids already at target
+    # (top-up "still owed" == 0) and inflate drawdownFundingMinorUnits to
+    # 260465 -- more than was ever actually funded into the drawdown space.
+    assert first["drawdownFundingMinorUnits"] == 182710
+    assert second["drawdownFundingMinorUnits"] == 182710
 
 
 # ---------------------------------------------------------------------------

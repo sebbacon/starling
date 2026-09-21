@@ -160,11 +160,11 @@ def run_salary_automation(
         allocations, drawdown_funding = _plan_initial_allocations(
             spaces=spaces,
             salary_minor_units=salary_minor_units,
-            top_up_balances=_resolve_top_up_cycle_start_balances(
+            top_up_balances=_resolve_top_up_balances_before_salary(
                 client,
                 account_uid=account["uid"],
                 spaces=spaces,
-                cycle_start=_next_month_start(salary_time),
+                anchor_time=salary_time,
             ),
         )
         due_tranches = due_release_count(salary_time, now=now_utc)
@@ -486,14 +486,22 @@ def _plan_initial_allocations(
     return planned, drawdown_funding
 
 
-def _resolve_top_up_cycle_start_balances(
+def _resolve_top_up_balances_before_salary(
     client: httpx.Client,
     *,
     account_uid: str,
     spaces: Dict[str, SpaceSnapshot],
-    cycle_start: datetime,
+    anchor_time: datetime,
 ) -> Dict[str, int]:
-    changes_since = _isoformat_utc(cycle_start)
+    # Reconstruct each top-up space's balance as it stood just before this
+    # salary arrived, by taking the current balance and rewinding every
+    # movement since then (spending, round-ups, and the top-up transfer
+    # itself once it has executed). Anchoring to the salary's own timestamp
+    # -- rather than the start of the following calendar month -- keeps this
+    # reconstruction stable forever: the top-up transfer always lands after
+    # salary_time, so it's always "rewound", and this cycle's top-up need
+    # never silently drops to zero just because it has already been paid.
+    changes_since = _isoformat_utc(anchor_time)
     balances: Dict[str, int] = {}
 
     for _, space_name, _ in TOP_UP_TARGETS:
@@ -628,16 +636,6 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
-
-
-def _next_month_start(value: datetime) -> datetime:
-    local = _as_utc(value).astimezone(LONDON_TZ)
-    month = local.month + 1
-    year = local.year
-    if month > 12:
-        month = 1
-        year += 1
-    return datetime(year, month, 1, tzinfo=LONDON_TZ).astimezone(timezone.utc)
 
 
 def _isoformat_utc(value: datetime) -> str:
